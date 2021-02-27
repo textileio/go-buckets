@@ -1,0 +1,244 @@
+syntax = "proto3";
+package api.pb;
+option go_package = "github.com/textileio/go-buckets/api/pb";
+
+message Metadata {
+     string key = 1;
+     map<string, PathAccessRole> roles = 2;
+     int64 updated_at = 3;
+}
+
+message Bucket {
+     string thread = 1;
+     string key = 2;
+     string owner = 3;
+     string name = 4;
+     int32 version = 5;
+     string link_key = 6;
+     string path = 7;
+     map<string, Metadata> metadata = 8;
+     int64 created_at = 9;
+     int64 updated_at = 10;
+}
+
+message Links {
+    string url = 1;
+    string www = 2;
+    string ipns = 3;
+}
+
+message Seed {
+    string cid = 1;
+    bytes data = 2;
+}
+
+message CreateRequest {
+    string thread = 1;
+    string name = 2;
+    string cid = 3;
+    bool private = 4;
+}
+
+message CreateResponse {
+    Bucket bucket = 1;
+    Links links = 2;
+    int64 pinned = 3;
+    Seed seed = 4;
+}
+
+message GetRequest {
+    string thread = 1;
+    string key = 2;
+}
+
+message GetResponse {
+    Bucket bucket = 1;
+    Links links = 2;
+}
+
+message GetLinksRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+}
+
+message GetLinksResponse {
+    Links links = 1;
+}
+
+message ListRequest {
+    string thread = 1;
+}
+
+message ListResponse {
+    repeated Bucket buckets = 1;
+}
+
+message RemoveRequest {
+    string thread = 1;
+    string key = 2;
+}
+
+message RemoveResponse {
+    int64 pinned = 1;
+}
+
+message ListPathRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+}
+
+message ListPathResponse {
+    PathItem item = 1;
+    Bucket bucket = 2;
+    Links links = 3;
+}
+
+message PathItem {
+    string cid = 1;
+    string name = 2;
+    string path = 3;
+    int64 size = 4;
+    bool is_dir = 5;
+    repeated PathItem items = 6;
+    int32 items_count = 7;
+    Metadata metadata = 8;
+}
+
+message ListIpfsPathRequest {
+    string path = 1;
+}
+
+message ListIpfsPathResponse {
+    PathItem item = 1;
+}
+
+message PushPathsRequest {
+    oneof payload {
+        Header header = 1;
+        Chunk chunk = 2;
+    }
+
+    message Header {
+        string thread = 1;
+        string key = 2;
+        string root = 3;
+    }
+
+    message Chunk {
+        string path = 1;
+        bytes data = 2;
+    }
+}
+
+message PushPathsResponse {
+    Bucket bucket = 1;
+    string path = 2;
+    string cid = 3;
+    int64 size = 4;
+    int64 pinned = 5;
+}
+
+message PullPathRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+}
+
+message PullPathResponse {
+    bytes chunk = 1;
+}
+
+message PullIpfsPathRequest {
+    string path = 1;
+}
+
+message PullIpfsPathResponse {
+    bytes chunk = 1;
+}
+
+message SetPathRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+    string cid = 4;
+}
+
+message SetPathResponse {
+    Bucket bucket = 1;
+    int64 pinned = 2;
+}
+
+message MovePathRequest {
+    string thread = 1;
+    string key = 2;
+    string from_path = 3;
+    string to_path = 4;
+}
+
+message MovePathResponse {
+    Bucket bucket = 1;
+    int64 pinned = 2;
+}
+
+message RemovePathRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+    string root = 4;
+}
+
+message RemovePathResponse {
+    Bucket bucket = 1;
+    int64 pinned = 2;
+}
+
+enum PathAccessRole {
+    PATH_ACCESS_ROLE_UNSPECIFIED = 0;
+    PATH_ACCESS_ROLE_READER = 1;
+    PATH_ACCESS_ROLE_WRITER = 2;
+    PATH_ACCESS_ROLE_ADMIN = 3;
+}
+
+message PushPathAccessRolesRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+    map<string, PathAccessRole> roles = 4;
+}
+
+message PushPathAccessRolesResponse {
+    Bucket bucket = 1;
+    int64 pinned = 2;
+}
+
+message PullPathAccessRolesRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+}
+
+message PullPathAccessRolesResponse {
+    map<string, PathAccessRole> roles = 1;
+}
+
+service APIService {
+    rpc Create(CreateRequest) returns (CreateResponse) {}
+    rpc Get(GetRequest) returns (GetResponse) {}
+    rpc GetLinks(GetLinksRequest) returns (GetLinksResponse) {}
+    rpc List(ListRequest) returns (ListResponse) {}
+    rpc Remove(RemoveRequest) returns (RemoveResponse) {}
+
+    rpc ListPath(ListPathRequest) returns (ListPathResponse) {}
+    rpc ListIpfsPath(ListIpfsPathRequest) returns (ListIpfsPathResponse) {}
+    rpc PushPaths(stream PushPathsRequest) returns (stream PushPathsResponse) {}
+    rpc PullPath(PullPathRequest) returns (stream PullPathResponse) {}
+    rpc PullIpfsPath(PullIpfsPathRequest) returns (stream PullIpfsPathResponse) {}
+    rpc SetPath(SetPathRequest) returns (SetPathResponse) {}
+    rpc MovePath(MovePathRequest) returns (MovePathResponse) {}
+    rpc RemovePath(RemovePathRequest) returns (RemovePathResponse) {}
+
+    rpc PushPathAccessRoles(PushPathAccessRolesRequest) returns (PushPathAccessRolesResponse) {}
+    rpc PullPathAccessRoles(PullPathAccessRolesRequest) returns (PullPathAccessRolesResponse) {}
+}

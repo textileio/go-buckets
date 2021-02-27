@@ -6,8 +6,9 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
-	"github.com/textileio/textile/v2/buckets"
-	"github.com/textileio/textile/v2/cmd"
+	"github.com/textileio/go-buckets/cmd"
+	"github.com/textileio/go-buckets/collection"
+	"github.com/textileio/go-threads/core/did"
 )
 
 var rolesCmd = &cobra.Command{
@@ -60,20 +61,22 @@ Access roles:
 			}
 			roleStr = roles[index]
 		}
-		role, err := buckets.NewRoleFromString(roleStr)
+		role, err := collection.NewRoleFromString(roleStr)
 		if err != nil {
-			cmd.Error(fmt.Errorf("access role must be one of: none, reader, writer, or admin"))
+			cmd.Err(fmt.Errorf("access role must be one of: none, reader, writer, or admin"))
 		}
 		var pth string
 		if len(args) > 1 {
 			pth = args[1]
 		}
-		res, err := buck.PushPathAccessRoles(ctx, pth, map[string]buckets.Role{args[0]: role})
+		res, err := buck.PushPathAccessRoles(ctx, pth, map[did.DID]collection.Role{
+			did.DID(args[0]): role,
+		})
 		cmd.ErrCheck(err)
 		var data [][]string
 		if len(res) > 0 {
 			for i, r := range res {
-				data = append(data, []string{i, r.String()})
+				data = append(data, []string{string(i), r.String()})
 			}
 		}
 		if len(data) > 0 {
@@ -107,7 +110,7 @@ var rolesLsCmd = &cobra.Command{
 		var data [][]string
 		if len(res) > 0 {
 			for i, r := range res {
-				data = append(data, []string{i, r.String()})
+				data = append(data, []string{string(i), r.String()})
 			}
 		}
 		if len(data) > 0 {

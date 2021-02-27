@@ -8,11 +8,8 @@ import (
 	cid "github.com/ipfs/go-cid"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
-	"github.com/textileio/go-threads/core/thread"
-	"github.com/textileio/go-threads/db"
-	"github.com/textileio/textile/v2/api/common"
-	"github.com/textileio/textile/v2/buckets/local"
-	"github.com/textileio/textile/v2/cmd"
+	"github.com/textileio/go-buckets/cmd"
+	"github.com/textileio/go-buckets/local"
 )
 
 var initCmd = &cobra.Command{
@@ -73,14 +70,6 @@ Use the '--hard' flag to discard all local changes.
 			cmd.Fatal(errors.New("--cid cannot be used with an existing bucket"))
 		}
 
-		// (jsign): re-enable when this feature is usable in mainnet.
-		//unfreeze, err := c.Flags().GetBool("unfreeze")
-		//cmd.ErrCheck(err)
-		var unfreeze bool
-		if unfreeze && xcid == cid.Undef {
-			cmd.Fatal(errors.New("--unfreeze requires specifying --cid"))
-		}
-
 		var name string
 		var private bool
 		if !existing && !chooseExisting {
@@ -113,7 +102,7 @@ Use the '--hard' flag to discard all local changes.
 		if chooseExisting {
 			ctx, cancel := context.WithTimeout(context.Background(), cmd.Timeout)
 			defer cancel()
-			list, err := bucks.RemoteBuckets(ctx, conf.Thread)
+			list, err := bucks.RemoteBuckets(ctx, conf.Thread, conf.Identity)
 			cmd.ErrCheck(err)
 			if len(list) == 0 {
 				cmd.Fatal(fmt.Errorf("no existing buckets found"))
@@ -140,30 +129,31 @@ Use the '--hard' flag to discard all local changes.
 		}
 
 		if !conf.Thread.Defined() {
-			ctx, cancel := context.WithTimeout(bucks.Context(context.Background()), cmd.Timeout)
-			defer cancel()
-			selected := bucks.Clients().SelectThread(
-				ctx,
-				"Buckets are written to a threadDB. Select or create a new one",
-				aurora.Sprintf(aurora.BrightBlack("> Selected threadDB {{ .Label | white | bold }}")),
-				true)
-			if selected.Label == "Create new" {
-				if selected.Name == "" {
-					prompt := promptui.Prompt{
-						Label: "Enter a name for your new threadDB (optional)",
-					}
-					selected.Name, err = prompt.Run()
-					if err != nil {
-						cmd.End("")
-					}
-				}
-				ctx = common.NewThreadNameContext(ctx, selected.Name)
-				conf.Thread = thread.NewIDV1(thread.Raw, 32)
-				err = bucks.Clients().Threads.NewDB(ctx, conf.Thread, db.WithNewManagedName(selected.Name))
-				cmd.ErrCheck(err)
-			} else {
-				conf.Thread = selected.ID
-			}
+			cmd.Fatal(errors.New("oops"))
+			//ctx, cancel := context.WithTimeout(bucks.Context(context.Background()), cmd.Timeout)
+			//defer cancel()
+			//selected := bucks.Clients().SelectThread(
+			//	ctx,
+			//	"Buckets are written to a threadDB. Select or create a new one",
+			//	aurora.Sprintf(aurora.BrightBlack("> Selected threadDB {{ .Label | white | bold }}")),
+			//	true)
+			//if selected.Label == "Create new" {
+			//	if selected.Name == "" {
+			//		prompt := promptui.Prompt{
+			//			Label: "Enter a name for your new threadDB (optional)",
+			//		}
+			//		selected.Name, err = prompt.Run()
+			//		if err != nil {
+			//			cmd.End("")
+			//		}
+			//	}
+			//	ctx = common.NewThreadNameContext(ctx, selected.Name)
+			//	conf.Thread = thread.NewIDV1(thread.Raw, 32)
+			//	err = bucks.Clients().Threads.NewDB(ctx, conf.Thread, db.WithNewManagedName(selected.Name))
+			//	cmd.ErrCheck(err)
+			//} else {
+			//	conf.Thread = selected.ID
+			//}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), cmd.Timeout)
@@ -181,17 +171,9 @@ Use the '--hard' flag to discard all local changes.
 			local.WithName(name),
 			local.WithPrivate(private),
 			local.WithCid(xcid),
-			local.WithUnfreeze(unfreeze),
 			local.WithStrategy(strategy),
 			local.WithInitEvents(events))
 		cmd.ErrCheck(err)
-
-		if unfreeze {
-			cmd.Message("The retrieval-id is: %s", buck.RetrievalID())
-			cmd.Message("The bucket will be automatically created if the Filecoin retrieval succeeds.")
-			cmd.Message("Track progress using `hub retrievals [ls | logs]`.")
-			return
-		}
 
 		links, err := buck.RemoteLinks(ctx, "")
 		cmd.ErrCheck(err)

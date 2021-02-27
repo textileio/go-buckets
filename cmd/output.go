@@ -12,8 +12,6 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	aurora2 "github.com/logrusorgru/aurora"
 	"github.com/olekukonko/tablewriter"
-	"github.com/textileio/textile/v2/api/billingd/common"
-	"github.com/textileio/textile/v2/api/bucketsd"
 	"google.golang.org/grpc/status"
 )
 
@@ -26,6 +24,11 @@ func Message(format string, args ...interface{}) {
 	fmt.Println(aurora.Sprintf(aurora.BrightBlack("> "+format), args...))
 }
 
+func Success(format string, args ...interface{}) {
+	fmt.Println(aurora.Sprintf(aurora.Cyan("> Success! %s"),
+		aurora.Sprintf(aurora.BrightBlack(format), args...)))
+}
+
 func Warn(format string, args ...interface{}) {
 	if format == "" {
 		return
@@ -34,23 +37,7 @@ func Warn(format string, args ...interface{}) {
 		aurora.Sprintf(aurora.BrightBlack(format), args...)))
 }
 
-func Success(format string, args ...interface{}) {
-	fmt.Println(aurora.Sprintf(aurora.Cyan("> Success! %s"),
-		aurora.Sprintf(aurora.BrightBlack(format), args...)))
-}
-
-func JSON(data interface{}) {
-	bytes, err := json.MarshalIndent(data, "", "  ")
-	ErrCheck(err)
-	fmt.Println(aurora.BrightBlack(string(bytes)))
-}
-
-func End(format string, args ...interface{}) {
-	Message(format, args...)
-	os.Exit(0)
-}
-
-func Error(err error, args ...interface{}) {
+func Err(err error, args ...interface{}) {
 	var msg string
 	stat, ok := status.FromError(err)
 	if ok {
@@ -62,31 +49,17 @@ func Error(err error, args ...interface{}) {
 	words[0] = strings.Title(words[0])
 	msg = strings.Join(words, " ")
 
-	// @todo: Clean this up somehow?
-	if strings.Contains(strings.ToLower(msg), common.ErrExceedsFreeQuota.Error()) ||
-		strings.Contains(strings.ToLower(msg), bucketsd.ErrStorageQuotaExhausted.Error()) {
-		fmt.Println(aurora.Sprintf(aurora.Red("> Error! %s %s"),
-			aurora.Sprintf(aurora.BrightBlack(msg), args...),
-			aurora.Sprintf(aurora.BrightBlack("(use `%s` to add a payment method)"),
-				aurora.Cyan("hub billing portal"))))
-	} else if strings.Contains(strings.ToLower(msg), common.ErrSubscriptionCanceled.Error()) {
-		fmt.Println(aurora.Sprintf(aurora.Red("> Error! %s %s"),
-			aurora.Sprintf(aurora.BrightBlack(msg), args...),
-			aurora.Sprintf(aurora.BrightBlack("(use `%s` to re-enable billing)"),
-				aurora.Cyan("hub billing setup"))))
-	} else if strings.Contains(strings.ToLower(msg), common.ErrSubscriptionPaymentRequired.Error()) {
-		fmt.Println(aurora.Sprintf(aurora.Red("> Error! %s %s"),
-			aurora.Sprintf(aurora.BrightBlack(msg), args...),
-			aurora.Sprintf(aurora.BrightBlack("(use `%s` to make a payment)"),
-				aurora.Cyan("hub billing portal"))))
-	} else {
-		fmt.Println(aurora.Sprintf(aurora.Red("> Error! %s"),
-			aurora.Sprintf(aurora.BrightBlack(msg), args...)))
-	}
+	fmt.Println(aurora.Sprintf(aurora.Red("> Error! %s"),
+		aurora.Sprintf(aurora.BrightBlack(msg), args...)))
+}
+
+func End(format string, args ...interface{}) {
+	Message(format, args...)
+	os.Exit(0)
 }
 
 func Fatal(err error, args ...interface{}) {
-	Error(err, args...)
+	Err(err, args...)
 	os.Exit(1)
 }
 
@@ -94,6 +67,18 @@ func ErrCheck(err error, args ...interface{}) {
 	if err != nil {
 		Fatal(err, args...)
 	}
+}
+
+func LogErr(err error, args ...interface{}) {
+	if err != nil {
+		Err(err, args...)
+	}
+}
+
+func RenderJSON(data interface{}) {
+	bytes, err := json.MarshalIndent(data, "", "  ")
+	ErrCheck(err)
+	fmt.Println(string(bytes))
 }
 
 func RenderTable(header []string, data [][]string) {

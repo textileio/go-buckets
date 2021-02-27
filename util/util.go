@@ -5,26 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gosimple/slug"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/interface-go-ipfs-core/path"
-	ma "github.com/multiformats/go-multiaddr"
+	maddr "github.com/multiformats/go-multiaddr"
 	mbase "github.com/multiformats/go-multibase"
 )
-
-func init() {
-	slug.MaxLength = 32
-	slug.Lowercase = false
-}
-
-func ToValidName(str string) (name string, ok bool) {
-	name = slug.Make(str)
-	if len(name) == 0 {
-		ok = false
-		return
-	}
-	return name, true
-}
 
 func GenerateRandomBytes(n int) []byte {
 	b := make([]byte, n)
@@ -44,8 +29,8 @@ func MakeToken(n int) string {
 	return encoded
 }
 
-func MustParseAddr(str string) ma.Multiaddr {
-	addr, err := ma.NewMultiaddr(str)
+func MustParseAddr(str string) maddr.Multiaddr {
+	addr, err := maddr.NewMultiaddr(str)
 	if err != nil {
 		panic(err)
 	}

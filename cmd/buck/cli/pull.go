@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/spf13/cobra"
-	"github.com/textileio/textile/v2/buckets/local"
-	"github.com/textileio/textile/v2/cmd"
+	"github.com/textileio/go-buckets/cmd"
+	"github.com/textileio/go-buckets/local"
 )
 
 var pullCmd = &cobra.Command{

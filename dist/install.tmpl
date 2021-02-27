@@ -8,7 +8,7 @@ set -Eeuo pipefail
 
 INSTALL_DIR="$(dirname "$0")"
 
-file="$INSTALL_DIR/{{ .Env.TXTL_FILE }}"
+file="$INSTALL_DIR/{{ .Env.BIN_FILE }}"
 binpaths="/usr/local/bin /usr/bin"
 
 # This variable contains a nonzero length string in case the script fails

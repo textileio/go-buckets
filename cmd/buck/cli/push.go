@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/textileio/textile/v2/buckets"
-	"github.com/textileio/textile/v2/buckets/local"
-	"github.com/textileio/textile/v2/cmd"
+	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/cmd"
+	"github.com/textileio/go-buckets/local"
 )
 
 const nonFastForwardMsg = "the root of your bucket is behind (try `%s` before pushing again)"

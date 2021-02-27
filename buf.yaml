@@ -2,9 +2,7 @@ build:
   roots:
     - .
   excludes:
-    - api/bucketsd/pb/javascript
-    - api/hubd/pb/javascript
-    - api/usersd/pb/javascript
+    - api/pb/javascript
 lint:
   use:
     - DEFAULT

@@ -14,7 +14,7 @@ import (
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/textileio/textile/v2/util"
+	"github.com/textileio/go-buckets/util"
 )
 
 func (g *Gateway) ipfsHandler(c *gin.Context) {

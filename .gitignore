@@ -21,12 +21,8 @@ node_modules/
 .idea/
 .vscode/
 
-# Textile
-.textile/
-.hubd/
-.buckd/
+# Project
 .env
-.DS_Store
 buildtools/protoc
 buildtools/protoc-gen-go
 build/

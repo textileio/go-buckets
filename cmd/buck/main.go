@@ -2,14 +2,16 @@ package main
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/textileio/textile/v2/buckets/local"
-	"github.com/textileio/textile/v2/cmd"
-	buck "github.com/textileio/textile/v2/cmd/buck/cli"
+	bc "github.com/textileio/go-buckets/api/client"
+	"github.com/textileio/go-buckets/api/common"
+	"github.com/textileio/go-buckets/cmd"
+	buck "github.com/textileio/go-buckets/cmd/buck/cli"
+	"github.com/textileio/go-buckets/local"
 )
 
-const defaultTarget = "127.0.0.1:3006"
+const defaultTarget = "127.0.0.1:5000"
 
-var clients *cmd.Clients
+var client *bc.Client
 
 func init() {
 	buck.Init(rootCmd)
@@ -31,11 +33,13 @@ Manages files and folders in an object storage bucket.`,
 		config := local.DefaultConfConfig()
 		target := cmd.GetFlagOrEnvValue(c, "api", config.EnvPrefix)
 
-		clients = cmd.NewClients(target, false)
-		buck.SetBucks(local.NewBuckets(clients, config))
+		var err error
+		client, err = bc.NewClient(target, common.GetClientRPCOpts(target)...)
+		cmd.ErrCheck(err)
+		buck.SetBucks(local.NewBuckets(client, config))
 	},
 	PersistentPostRun: func(c *cobra.Command, args []string) {
-		clients.Close()
+		cmd.ErrCheck(client.Close())
 	},
 	Args: cobra.ExactArgs(0),
 }

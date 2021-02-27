@@ -14,14 +14,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	assets "github.com/textileio/go-assets"
+	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/collection"
+	"github.com/textileio/go-buckets/ipns"
+	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-threads/core/did"
 	"github.com/textileio/go-threads/core/thread"
-	"github.com/textileio/go-threads/db"
-	"github.com/textileio/textile/v2/api/bucketsd/client"
-	"github.com/textileio/textile/v2/api/common"
-	"github.com/textileio/textile/v2/buckets"
-	mdb "github.com/textileio/textile/v2/mongodb"
-	tdb "github.com/textileio/textile/v2/threaddb"
-	"github.com/textileio/textile/v2/util"
 )
 
 type fileSystem struct {
@@ -37,21 +35,21 @@ func (f *fileSystem) Exists(prefix, path string) bool {
 	return ok
 }
 
-func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thread.ID, token thread.Token) {
-	rep, err := g.buckets.List(ctx)
+func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thread.ID, token did.Token) {
+	rep, err := g.lib.List(ctx, threadID, token)
 	if err != nil {
 		renderError(c, http.StatusBadRequest, err)
 		return
 	}
-	links := make([]link, len(rep.Roots))
-	for i, r := range rep.Roots {
+	links := make([]link, len(rep))
+	for i, r := range rep {
 		var name string
 		if r.Name != "" {
 			name = r.Name
 		} else {
 			name = r.Key
 		}
-		p := path.Join("thread", threadID.String(), buckets.CollectionName, r.Key)
+		p := path.Join("thread", threadID.String(), collection.Name, r.Key)
 		if token.Defined() {
 			p += "?token=" + string(token)
 		}
@@ -63,7 +61,7 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 		}
 	}
 	c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
-		"Title":   "Index of " + path.Join("/thread", threadID.String(), buckets.CollectionName),
+		"Title":   "Index of " + path.Join("/thread", threadID.String(), collection.Name),
 		"Root":    "/",
 		"Path":    "",
 		"Updated": "",
@@ -72,31 +70,40 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 	})
 }
 
-func (g *Gateway) renderBucketPath(c *gin.Context, ctx context.Context, threadID thread.ID, collection, id, pth string, token thread.Token) {
-	var buck tdb.Bucket
-	if err := g.threads.FindByID(ctx, threadID, collection, id, &buck, db.WithTxnToken(token)); err != nil {
-		render404(c)
-		return
-	}
-	rep, err := g.buckets.ListPath(ctx, buck.Key, pth)
+func (g *Gateway) renderBucketPath(
+	c *gin.Context,
+	ctx context.Context,
+	threadID thread.ID,
+	id,
+	pth string,
+	token did.Token,
+) {
+	rep, buck, err := g.lib.ListPath(ctx, threadID, id, pth, token)
 	if err != nil {
 		render404(c)
 		return
 	}
-	if !rep.Item.IsDir {
-		if err := g.buckets.PullPath(ctx, buck.Key, pth, c.Writer); err != nil {
+	if !rep.IsDir {
+		r, err := g.lib.PullPath(ctx, threadID, buck.Key, pth, token)
+		if err != nil {
 			render404(c)
+			return
+		}
+		defer r.Close()
+		if _, err := io.Copy(c.Writer, r); err != nil {
+			render404(c)
+			return
 		}
 	} else {
 		var base string
 		if g.subdomains {
-			base = buckets.CollectionName
+			base = collection.Name
 		} else {
-			base = path.Join("thread", threadID.String(), buckets.CollectionName)
+			base = path.Join("thread", threadID.String(), collection.Name)
 		}
 		var links []link
-		for _, item := range rep.Item.Items {
-			pth := path.Join(base, strings.Replace(item.Path, rep.Root.Path, rep.Root.Key, 1))
+		for _, item := range rep.Items {
+			pth := path.Join(base, strings.Replace(item.Path, buck.Path, buck.Key, 1))
 			if token.Defined() {
 				pth += "?token=" + string(token)
 			}
@@ -108,21 +115,21 @@ func (g *Gateway) renderBucketPath(c *gin.Context, ctx context.Context, threadID
 			})
 		}
 		var name string
-		if rep.Root.Name != "" {
-			name = rep.Root.Name
+		if buck.Name != "" {
+			name = buck.Name
 		} else {
-			name = rep.Root.Key
+			name = buck.Key
 		}
-		root := strings.Replace(rep.Item.Path, rep.Root.Path, name, 1)
-		back := path.Dir(path.Join(base, strings.Replace(rep.Item.Path, rep.Root.Path, rep.Root.Key, 1)))
+		root := strings.Replace(rep.Path, buck.Path, name, 1)
+		back := path.Dir(path.Join(base, strings.Replace(rep.Path, buck.Path, buck.Key, 1)))
 		if token.Defined() {
 			back += "?token=" + string(token)
 		}
 		c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
 			"Title":   "Index of /" + root,
 			"Root":    "/" + root,
-			"Path":    rep.Item.Path,
-			"Updated": time.Unix(0, rep.Root.UpdatedAt).String(),
+			"Path":    rep.Path,
+			"Updated": time.Unix(0, buck.UpdatedAt).String(),
 			"Back":    back,
 			"Links":   links,
 		})
@@ -130,17 +137,16 @@ func (g *Gateway) renderBucketPath(c *gin.Context, ctx context.Context, threadID
 }
 
 type serveBucketFS interface {
-	GetThread(ctx context.Context, key string) (thread.ID, error)
-	Exists(ctx context.Context, bucket, pth string) (bool, string)
-	Write(ctx context.Context, bucket, pth string, writer io.Writer) error
+	GetThread(key string) (thread.ID, error)
+	Exists(ctx context.Context, threadID thread.ID, bucket, pth string, token did.Token) (bool, string)
+	Write(ctx context.Context, threadID thread.ID, bucket, pth string, token did.Token, writer io.Writer) error
 	ValidHost() string
 }
 
 type bucketFS struct {
-	client  *client.Client
-	keys    *mdb.IPNSKeys
-	session string
-	host    string
+	lib    *buckets.Buckets
+	ipns   *ipns.Manager
+	domain string
 }
 
 func serveBucket(fs serveBucketFS) gin.HandlerFunc {
@@ -149,20 +155,15 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 		if err != nil {
 			return
 		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
-		defer cancel()
-		threadID, err := fs.GetThread(ctx, key)
+		threadID, err := fs.GetThread(key)
 		if err != nil {
 			return
 		}
-		ctx = common.NewThreadIDContext(ctx, threadID)
-		token := thread.Token(c.Query("token"))
-		if token.Defined() {
-			ctx = thread.NewTokenContext(ctx, token)
-		}
+		token := did.Token(c.Query("token"))
 
-		exists, target := fs.Exists(ctx, key, c.Request.URL.Path)
+		ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+		defer cancel()
+		exists, target := fs.Exists(ctx, threadID, key, c.Request.URL.Path, token)
 		if exists {
 			c.Writer.WriteHeader(http.StatusOK)
 			ctype := mime.TypeByExtension(filepath.Ext(c.Request.URL.Path))
@@ -170,7 +171,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 				ctype = "application/octet-stream"
 			}
 			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, key, c.Request.URL.Path, c.Writer); err != nil {
+			if err := fs.Write(ctx, threadID, key, c.Request.URL.Path, token, c.Writer); err != nil {
 				renderError(c, http.StatusInternalServerError, err)
 			} else {
 				c.Abort()
@@ -180,7 +181,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 			ctype := mime.TypeByExtension(filepath.Ext(content))
 			c.Writer.WriteHeader(http.StatusOK)
 			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, key, content, c.Writer); err != nil {
+			if err := fs.Write(ctx, threadID, key, content, token, c.Writer); err != nil {
 				renderError(c, http.StatusInternalServerError, err)
 			} else {
 				c.Abort()
@@ -189,25 +190,24 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 	}
 }
 
-func (f *bucketFS) GetThread(ctx context.Context, bkey string) (id thread.ID, err error) {
-	key, err := f.keys.GetByCid(ctx, bkey)
+func (f *bucketFS) GetThread(bkey string) (id thread.ID, err error) {
+	key, err := f.ipns.Store().GetByCid(bkey)
 	if err != nil {
 		return
 	}
 	return key.ThreadID, nil
 }
 
-func (f *bucketFS) Exists(ctx context.Context, key, pth string) (ok bool, name string) {
+func (f *bucketFS) Exists(ctx context.Context, threadID thread.ID, key, pth string, token did.Token) (ok bool, name string) {
 	if key == "" || pth == "/" {
 		return
 	}
-	ctx = common.NewSessionContext(ctx, f.session)
-	rep, err := f.client.ListPath(ctx, key, pth)
+	rep, _, err := f.lib.ListPath(ctx, threadID, key, pth, token)
 	if err != nil {
 		return
 	}
-	if rep.Item.IsDir {
-		for _, item := range rep.Item.Items {
+	if rep.IsDir {
+		for _, item := range rep.Items {
 			if item.Name == "index.html" {
 				return false, item.Name
 			}
@@ -217,48 +217,50 @@ func (f *bucketFS) Exists(ctx context.Context, key, pth string) (ok bool, name s
 	return true, ""
 }
 
-func (f *bucketFS) Write(ctx context.Context, key, pth string, writer io.Writer) error {
-	ctx = common.NewSessionContext(ctx, f.session)
-	return f.client.PullPath(ctx, key, pth, writer)
+func (f *bucketFS) Write(ctx context.Context, threadID thread.ID, key, pth string, token did.Token, writer io.Writer) error {
+	r, err := f.lib.PullPath(ctx, threadID, key, pth, token)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	_, err = io.Copy(writer, r)
+	return err
 }
 
 func (f *bucketFS) ValidHost() string {
-	return f.host
+	return f.domain
 }
 
 // renderWWWBucket renders a bucket as a website.
 func (g *Gateway) renderWWWBucket(c *gin.Context, key string) {
-	ctx, cancel := context.WithTimeout(common.NewSessionContext(context.Background(), g.apiSession), handlerTimeout)
+	ipnskey, err := g.ipns.Store().GetByCid(key)
+	if err != nil {
+		render404(c)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	ipnskey, err := g.collections.IPNSKeys.GetByCid(ctx, key)
+	token := did.Token(c.Query("token"))
+	rep, _, err := g.lib.ListPath(ctx, ipnskey.ThreadID, key, "", token)
 	if err != nil {
 		render404(c)
 		return
 	}
-	ctx = common.NewThreadIDContext(ctx, ipnskey.ThreadID)
-	token := thread.Token(c.Query("token"))
-	if token.Defined() {
-		ctx = thread.NewTokenContext(ctx, token)
-	}
-
-	buck := &tdb.Bucket{}
-	if err := g.threads.FindByID(ctx, ipnskey.ThreadID, buckets.CollectionName, key, &buck, db.WithTxnToken(token)); err != nil {
-		render404(c)
-		return
-	}
-	rep, err := g.buckets.ListPath(ctx, buck.Key, "")
-	if err != nil {
-		render404(c)
-		return
-	}
-	for _, item := range rep.Item.Items {
+	for _, item := range rep.Items {
 		if item.Name == "index.html" {
 			c.Writer.WriteHeader(http.StatusOK)
 			c.Writer.Header().Set("Content-Type", "text/html")
-			if err := g.buckets.PullPath(ctx, buck.Key, item.Name, c.Writer); err != nil {
+			r, err := g.lib.PullPath(ctx, ipnskey.ThreadID, key, item.Name, token)
+			if err != nil {
 				render404(c)
+				return
 			}
-			return
+			if _, err := io.Copy(c.Writer, r); err != nil {
+				r.Close()
+				render404(c)
+				return
+			}
+			r.Close()
 		}
 	}
 	renderError(c, http.StatusNotFound, fmt.Errorf("an index.html file was not found in this bucket"))

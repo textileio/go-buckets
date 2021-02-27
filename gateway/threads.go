@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	col "github.com/textileio/go-buckets/collection"
+	"github.com/textileio/go-threads/core/did"
 	"github.com/textileio/go-threads/core/thread"
 	"github.com/textileio/go-threads/db"
-	"github.com/textileio/textile/v2/api/common"
-	"github.com/textileio/textile/v2/buckets"
 )
 
 // collectionHandler handles collection requests.
@@ -25,21 +25,17 @@ func (g *Gateway) collectionHandler(c *gin.Context) {
 
 // renderCollection renders all instances in a collection.
 func (g *Gateway) renderCollection(c *gin.Context, threadID thread.ID, collection string) {
-	ctx, cancel := context.WithTimeout(common.NewSessionContext(context.Background(), g.apiSession), handlerTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	ctx = common.NewThreadIDContext(ctx, threadID)
-	token := thread.Token(c.Query("token"))
-	if token.Defined() {
-		ctx = thread.NewTokenContext(ctx, token)
-	}
+	token := did.Token(c.Query("token"))
 
 	jsn := c.Query("json") == "true"
-	if collection == buckets.CollectionName && !jsn {
+	if collection == col.Name && !jsn {
 		g.renderBucket(c, ctx, threadID, token)
 		return
 	} else {
 		var dummy interface{}
-		res, err := g.threads.Find(ctx, threadID, collection, &db.Query{}, &dummy, db.WithTxnToken(token))
+		res, err := g.lib.DB().Find(ctx, threadID, collection, &db.Query{}, &dummy, db.WithTxnToken(token))
 		if err != nil {
 			render404(c)
 			return
@@ -64,25 +60,20 @@ func (g *Gateway) instanceHandler(c *gin.Context) {
 func (g *Gateway) renderInstance(c *gin.Context, threadID thread.ID, collection, id, pth string) {
 	pth = strings.TrimPrefix(pth, "/")
 	jsn := c.Query("json") == "true"
-	if (collection != buckets.CollectionName || jsn) && pth != "" {
+	if (collection != col.Name || jsn) && pth != "" {
 		render404(c)
 		return
 	}
+	token := did.Token(c.Query("token"))
 
-	ctx, cancel := context.WithTimeout(common.NewSessionContext(context.Background(), g.apiSession), handlerTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	ctx = common.NewThreadIDContext(ctx, threadID)
-	token := thread.Token(c.Query("token"))
-	if token.Defined() {
-		ctx = thread.NewTokenContext(ctx, token)
-	}
-
-	if collection == buckets.CollectionName && !jsn {
-		g.renderBucketPath(c, ctx, threadID, collection, id, pth, token)
+	if collection == col.Name && !jsn {
+		g.renderBucketPath(c, ctx, threadID, id, pth, token)
 		return
 	} else {
 		var res interface{}
-		if err := g.threads.FindByID(ctx, threadID, collection, id, &res, db.WithTxnToken(token)); err != nil {
+		if err := g.lib.DB().FindByID(ctx, threadID, collection, id, &res, db.WithTxnToken(token)); err != nil {
 			render404(c)
 			return
 		}

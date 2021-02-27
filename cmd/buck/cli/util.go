@@ -7,8 +7,8 @@ import (
 
 	pb "github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
-	"github.com/textileio/textile/v2/buckets/local"
-	"github.com/textileio/textile/v2/cmd"
+	"github.com/textileio/go-buckets/cmd"
+	"github.com/textileio/go-buckets/local"
 )
 
 func getConfirm(label string, auto bool) local.ConfirmDiffFunc {

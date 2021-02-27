@@ -6,21 +6,19 @@ import (
 	"sync"
 	"time"
 
+	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/options"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/libp2p/go-libp2p-core/peer"
 	mbase "github.com/multiformats/go-multibase"
-	cron "github.com/robfig/cron/v3"
+	s "github.com/textileio/go-buckets/ipns/store"
+	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/thread"
-	tutil "github.com/textileio/go-threads/util"
-	mdb "github.com/textileio/textile/v2/mongodb"
-	"github.com/textileio/textile/v2/util"
-	"golang.org/x/sync/errgroup"
 )
 
-var log = logging.Logger("ipns")
+var log = logging.Logger("buckets-ipns")
 
 const (
 	// nameLen is the length of the random IPNS key name.
@@ -29,66 +27,38 @@ const (
 	publishTimeout = time.Minute * 2
 	// maxCancelPublishTries is the number of time cancelling a publish is allowed to fail.
 	maxCancelPublishTries = 10
-	// list all keys timeout
-	listKeysTimeout = time.Hour
 )
 
 // Manager handles bucket name publishing to IPNS.
 type Manager struct {
-	keys    *mdb.IPNSKeys
+	store   *s.Store
 	keyAPI  iface.KeyAPI
 	nameAPI iface.NameAPI
 
 	sync.Mutex
-	keyLocks             map[string]chan struct{}
-	ctxsLock             sync.Mutex
-	ctxs                 map[string]context.CancelFunc
-	republisher          *cron.Cron
-	republishConcurrency int
+	keyLocks map[string]chan struct{}
+	ctxsLock sync.Mutex
+	ctxs     map[string]context.CancelFunc
 }
 
 // NewManager returns a new IPNS manager.
-func NewManager(
-	keys *mdb.IPNSKeys,
-	keyAPI iface.KeyAPI,
-	nameAPI iface.NameAPI,
-	republishConcurrency int,
-	debug bool,
-) (*Manager, error) {
-	if debug {
-		if err := tutil.SetLogLevels(map[string]logging.LogLevel{
-			"ipns": logging.LevelDebug,
-		}); err != nil {
-			return nil, err
-		}
-	}
+func NewManager(store ds.TxnDatastore, ipfs iface.CoreAPI) (*Manager, error) {
 	return &Manager{
-		keys:                 keys,
-		keyAPI:               keyAPI,
-		nameAPI:              nameAPI,
-		ctxs:                 make(map[string]context.CancelFunc),
-		keyLocks:             make(map[string]chan struct{}),
-		republisher:          cron.New(),
-		republishConcurrency: republishConcurrency,
+		store:    s.NewStore(store),
+		keyAPI:   ipfs.Key(),
+		nameAPI:  ipfs.Name(),
+		ctxs:     make(map[string]context.CancelFunc),
+		keyLocks: make(map[string]chan struct{}),
 	}, nil
 }
 
-// StartRepublishing initializes a key republishing cron
-func (m *Manager) StartRepublishing(schedule string) error {
-	if _, err := m.republisher.AddFunc(schedule, func() {
-		if err := m.republish(); err != nil {
-			log.Errorf("republishing ipns keys: %v", err)
-		}
-	}); err != nil {
-		log.Errorf("republishing aborted: %v", err)
-		return err
-	}
-	m.republisher.Start()
-	return nil
+// Store returns the key store.
+func (m *Manager) Store() *s.Store {
+	return m.store
 }
 
 // CreateKey generates and saves a new IPNS key.
-func (m *Manager) CreateKey(ctx context.Context, dbID thread.ID, path path.Path) (keyID string, err error) {
+func (m *Manager) CreateKey(ctx context.Context, dbID thread.ID) (keyID string, err error) {
 	key, err := m.keyAPI.Generate(ctx, util.MakeToken(nameLen), options.Key.Type(options.RSAKey))
 	if err != nil {
 		return
@@ -97,7 +67,7 @@ func (m *Manager) CreateKey(ctx context.Context, dbID thread.ID, path path.Path)
 	if err != nil {
 		return
 	}
-	if err = m.keys.Create(ctx, key.Name(), keyID, dbID, path.String()); err != nil {
+	if err = m.store.Create(key.Name(), keyID, dbID); err != nil {
 		return
 	}
 	return keyID, nil
@@ -105,56 +75,20 @@ func (m *Manager) CreateKey(ctx context.Context, dbID thread.ID, path path.Path)
 
 // RemoveKey removes an IPNS key.
 func (m *Manager) RemoveKey(ctx context.Context, keyID string) error {
-	key, err := m.keys.GetByCid(ctx, keyID)
+	key, err := m.store.GetByCid(keyID)
 	if err != nil {
 		return err
 	}
 	if _, err = m.keyAPI.Remove(ctx, key.Name); err != nil {
 		return err
 	}
-	return m.keys.Delete(ctx, key.Name)
+	return m.store.Delete(key.Name)
 }
 
 // Publish publishes a path to IPNS with key ID.
 // Publishing can take up to a minute. Pending publishes are cancelled by consecutive
 // calls with the same key ID, which results in only the most recent publish succeeding.
 func (m *Manager) Publish(pth path.Path, keyID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
-	defer cancel()
-	key, err := m.keys.GetByCid(ctx, keyID)
-	if err != nil {
-		log.Error("key not found: %s", keyID)
-		return
-	}
-	err = m.keys.SetPath(ctx, pth.String(), key.Name)
-	if err != nil {
-		log.Error("set path failed: %s", keyID)
-		return
-	}
-	m.publish(pth, keyID)
-}
-
-// Close manager.
-func (m *Manager) Close() {
-	ctx := m.republisher.Stop()
-	<-ctx.Done()
-	log.Info("republisher was shutdown")
-	m.cancel()
-	log.Info("all pending ipns publishes were cancelled")
-}
-
-// cancel all pending publishes.
-func (m *Manager) cancel() {
-	m.Lock()
-	defer m.Unlock()
-	m.ctxsLock.Lock()
-	defer m.ctxsLock.Unlock()
-	for _, cancel := range m.ctxs {
-		cancel()
-	}
-}
-
-func (m *Manager) publish(pth path.Path, keyID string) {
 	ptl := m.getSemaphore(keyID)
 	try := 0
 	for {
@@ -166,9 +100,9 @@ func (m *Manager) publish(pth path.Path, keyID string) {
 			m.ctxsLock.Unlock()
 			if err := m.publishUnsafe(pctx, pth, keyID); err != nil {
 				if !errors.Is(err, context.Canceled) {
-					// The publish saturation did not meet the default level before the context expired.
-					// In most cases, the entry can still be discovered on the network.
-					log.Debugf("error publishing path %s: %v", pth, err)
+					// Logging as a warning because this often fails with "context deadline exceeded",
+					// even if the entry can be found on the network (not fully saturated).
+					log.Warnf("error publishing path %s: %v", pth, err)
 				} else {
 					log.Debugf("publishing path %s was cancelled: %v", pth, err)
 				}
@@ -188,7 +122,7 @@ func (m *Manager) publish(pth path.Path, keyID string) {
 			} else {
 				try++
 				if try > maxCancelPublishTries {
-					log.Debugf("failed to publish path %s: max tries exceeded", pth)
+					log.Warnf("failed to publish path %s: max tries exceeded", pth)
 					return
 				} else {
 					log.Debugf("failed to cancel publish (%v tries remaining)", maxCancelPublishTries-try)
@@ -197,8 +131,21 @@ func (m *Manager) publish(pth path.Path, keyID string) {
 		}
 	}
 }
+
+// Close all pending publishes.
+func (m *Manager) Close() error {
+	m.Lock()
+	defer m.Unlock()
+	m.ctxsLock.Lock()
+	defer m.ctxsLock.Unlock()
+	for _, cancel := range m.ctxs {
+		cancel()
+	}
+	return nil
+}
+
 func (m *Manager) publishUnsafe(ctx context.Context, pth path.Path, keyID string) error {
-	key, err := m.keys.GetByCid(ctx, keyID)
+	key, err := m.store.GetByCid(keyID)
 	if err != nil {
 		return err
 	}
@@ -220,41 +167,4 @@ func (m *Manager) getSemaphore(key string) chan struct{} {
 		m.keyLocks[key] = ptl
 	}
 	return ptl
-}
-
-func (m *Manager) republish() error {
-	ctx, cancel := context.WithTimeout(context.Background(), listKeysTimeout)
-	defer cancel()
-	start := time.Now()
-	keys, err := m.keys.List(ctx)
-	if err != nil {
-		return err
-	}
-	withPath := 0
-	eg, gctx := errgroup.WithContext(context.Background())
-	lim := make(chan struct{}, m.republishConcurrency)
-	for _, key := range keys {
-		key := key
-		if key.Path != "" {
-			withPath++
-			lim <- struct{}{}
-			eg.Go(func() error {
-				defer func() { <-lim }()
-				if gctx.Err() != nil {
-					return nil
-				}
-				m.publish(path.New(key.Path), key.Cid)
-				return nil
-			})
-		}
-	}
-	for i := 0; i < cap(lim); i++ {
-		lim <- struct{}{}
-	}
-	if err := eg.Wait(); err != nil {
-		return err
-	}
-
-	log.Infof("republished %d/%d keys in %v", len(keys), withPath, time.Since(start))
-	return nil
 }

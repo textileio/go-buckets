@@ -5,12 +5,9 @@ import (
 
 	cf "github.com/cloudflare/cloudflare-go"
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/textileio/go-threads/util"
 )
 
-var (
-	log = logging.Logger("dns")
-)
+var log = logging.Logger("buckets-dns")
 
 const IPFSGateway = "cloudflare-ipfs.com"
 
@@ -23,15 +20,7 @@ type Manager struct {
 }
 
 // NewManager return a cloudflare-backed dns updating client.
-func NewManager(domain string, zoneID string, token string, debug bool) (*Manager, error) {
-	if debug {
-		if err := util.SetLogLevels(map[string]logging.LogLevel{
-			"dns": logging.LevelDebug,
-		}); err != nil {
-			return nil, err
-		}
-	}
-
+func NewManager(domain string, zoneID string, token string) (*Manager, error) {
 	api, err := cf.NewWithAPIToken(token)
 	if err != nil {
 		return nil, err

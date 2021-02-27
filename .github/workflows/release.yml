@@ -10,7 +10,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v1
         with:
-          go-version: 1.15
+          go-version: 1.16
       - name: Check out code
         uses: actions/checkout@v1
       - name: Cache dependencies
@@ -28,7 +28,7 @@ jobs:
           go get -v -t -d ./...
       - name: Build release artifacts
         run: |
-          TXTL_VERSION=${{ github.event.release.tag_name }} make build-releases
+          BIN_VERSION=${{ github.event.release.tag_name }} make build-releases
           echo $(ls ./build/dist/)
       - name: Upload multiple assets to release
         uses: AButler/upload-release-assets@v2.0

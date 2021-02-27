@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -19,22 +18,15 @@ import (
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	isd "github.com/jbenet/go-is-domain"
 	"github.com/libp2p/go-libp2p-core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	mbase "github.com/multiformats/go-multibase"
 	"github.com/rs/cors"
 	gincors "github.com/rs/cors/wrapper/gin"
-	threadsclient "github.com/textileio/go-threads/api/client"
-	"github.com/textileio/go-threads/broadcast"
+	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/ipns"
 	"github.com/textileio/go-threads/core/thread"
-	tutil "github.com/textileio/go-threads/util"
-	bucketsclient "github.com/textileio/textile/v2/api/bucketsd/client"
-	"github.com/textileio/textile/v2/api/common"
-	mdb "github.com/textileio/textile/v2/mongodb"
-	"go.mongodb.org/mongo-driver/mongo"
-	"google.golang.org/grpc"
 )
 
-var log = logging.Logger("gateway")
+var log = logging.Logger("buckets-gateway")
 
 const handlerTimeout = time.Minute
 
@@ -50,87 +42,42 @@ type link struct {
 	Links string
 }
 
-// Gateway provides HTTP-based access to Textile.
+// Gateway provides HTTP-based access to buckets.
 type Gateway struct {
-	server        *http.Server
-	addr          ma.Multiaddr
-	url           string
-	subdomains    bool
-	bucketsDomain string
+	server *http.Server
+	lib    *buckets.Buckets
+	ipfs   iface.CoreAPI
+	ipns   *ipns.Manager
 
-	collections *mdb.Collections
-	apiSession  string
-	threads     *threadsclient.Client
-	buckets     *bucketsclient.Client
-	hub         bool
-
-	ipfs iface.CoreAPI
-
-	emailSessionBus *broadcast.Broadcaster
+	addr       string
+	url        string
+	domain     string
+	subdomains bool
 }
 
 // Config defines the gateway configuration.
 type Config struct {
-	Addr            ma.Multiaddr
-	URL             string
-	Subdomains      bool
-	BucketsDomain   string
-	APIAddr         ma.Multiaddr
-	APISession      string
-	Collections     *mdb.Collections
-	IPFSClient      iface.CoreAPI
-	EmailSessionBus *broadcast.Broadcaster
-	Hub             bool
-	Debug           bool
+	Addr       string
+	URL        string
+	Domain     string
+	Subdomains bool
 }
 
 // NewGateway returns a new gateway.
-func NewGateway(conf Config) (*Gateway, error) {
-	if conf.Debug {
-		if err := tutil.SetLogLevels(map[string]logging.LogLevel{
-			"gateway": logging.LevelDebug,
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	apiTarget, err := tutil.TCPAddrFromMultiAddr(conf.APIAddr)
-	if err != nil {
-		return nil, err
-	}
-	opts := []grpc.DialOption{
-		grpc.WithInsecure(),
-		grpc.WithPerRPCCredentials(common.Credentials{}),
-	}
-	tc, err := threadsclient.NewClient(apiTarget, opts...)
-	if err != nil {
-		return nil, err
-	}
-	bc, err := bucketsclient.NewClient(apiTarget, opts...)
-	if err != nil {
-		return nil, err
-	}
+func NewGateway(lib *buckets.Buckets, ipfs iface.CoreAPI, ipns *ipns.Manager, conf Config) (*Gateway, error) {
 	return &Gateway{
-		addr:            conf.Addr,
-		url:             conf.URL,
-		subdomains:      conf.Subdomains,
-		bucketsDomain:   conf.BucketsDomain,
-		collections:     conf.Collections,
-		apiSession:      conf.APISession,
-		threads:         tc,
-		buckets:         bc,
-		hub:             conf.Hub,
-		ipfs:            conf.IPFSClient,
-		emailSessionBus: conf.EmailSessionBus,
+		lib:        lib,
+		ipfs:       ipfs,
+		ipns:       ipns,
+		addr:       conf.Addr,
+		url:        conf.URL,
+		domain:     conf.Domain,
+		subdomains: conf.Subdomains,
 	}, nil
 }
 
 // Start the gateway.
 func (g *Gateway) Start() {
-	addr, err := tutil.TCPAddrFromMultiAddr(g.addr)
-	if err != nil {
-		log.Fatal(err)
-	}
 	router := gin.Default()
 
 	temp, err := loadTemplate()
@@ -142,10 +89,9 @@ func (g *Gateway) Start() {
 	router.Use(location.Default())
 	router.Use(static.Serve("", &fileSystem{Assets}))
 	router.Use(serveBucket(&bucketFS{
-		client:  g.buckets,
-		keys:    g.collections.IPNSKeys,
-		session: g.apiSession,
-		host:    g.bucketsDomain,
+		lib:    g.lib,
+		ipns:   g.ipns,
+		domain: g.domain,
 	}))
 	router.Use(gincors.New(cors.Options{}))
 
@@ -165,23 +111,16 @@ func (g *Gateway) Start() {
 	router.GET("/ipld/:root", g.subdomainOptionHandler, g.ipldHandler)
 	router.GET("/ipld/:root/*path", g.subdomainOptionHandler, g.ipldHandler)
 
-	if g.hub {
-		router.GET("/dashboard/:username", g.dashboardHandler)
-		router.GET("/confirm/:secret", g.confirmEmail)
-		router.GET("/consent/:invite", g.consentInvite)
-	}
-
 	router.NoRoute(g.subdomainHandler)
 
 	g.server = &http.Server{
-		Addr:    addr,
+		Addr:    g.addr,
 		Handler: router,
 	}
 	go func() {
 		if err := g.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("gateway error: %s", err)
+			log.Errorf("gateway error: %s", err)
 		}
-		log.Info("gateway was shutdown")
 	}()
 	log.Infof("gateway listening at %s", g.server.Addr)
 }
@@ -210,17 +149,11 @@ func (g *Gateway) Addr() string {
 	return g.server.Addr
 }
 
-// Stop the gateway.
-func (g *Gateway) Stop() error {
+// Close the gateway.
+func (g *Gateway) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := g.server.Shutdown(ctx); err != nil {
-		return err
-	}
-	if err := g.threads.Close(); err != nil {
-		return err
-	}
-	if err := g.buckets.Close(); err != nil {
 		return err
 	}
 	return nil
@@ -246,79 +179,6 @@ func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
 // dashboardHandler renders a dev or org dashboard.
 func (g *Gateway) dashboardHandler(c *gin.Context) {
 	render404(c)
-}
-
-// confirmEmail verifies an emailed secret.
-func (g *Gateway) confirmEmail(c *gin.Context) {
-	if err := g.emailSessionBus.Send(c.Param("secret")); err != nil {
-		renderError(c, http.StatusInternalServerError, err)
-		return
-	}
-	c.HTML(http.StatusOK, "/public/html/confirm.gohtml", nil)
-}
-
-// consentInvite marks an invite as accepted.
-// If the associated email belongs to an existing user, they will be added to the org.
-func (g *Gateway) consentInvite(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
-	defer cancel()
-	invite, err := g.collections.Invites.Get(ctx, c.Param("invite"))
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			render404(c)
-		} else {
-			renderError(c, http.StatusInternalServerError, err)
-		}
-		return
-	}
-	if !invite.Accepted {
-		if time.Now().After(invite.ExpiresAt) {
-			if err := g.collections.Invites.Delete(ctx, invite.Token); err != nil {
-				renderError(c, http.StatusInternalServerError, err)
-			} else {
-				renderError(c, http.StatusPreconditionFailed, fmt.Errorf("this invitation has expired"))
-			}
-			return
-		}
-		dev, err := g.collections.Accounts.GetByUsernameOrEmail(ctx, invite.EmailTo)
-		if err != nil {
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				if err := g.collections.Invites.Accept(ctx, invite.Token); err != nil {
-					renderError(c, http.StatusInternalServerError, err)
-				}
-			} else {
-				renderError(c, http.StatusInternalServerError, err)
-				return
-			}
-		}
-		if dev != nil {
-			if err := g.collections.Accounts.AddMember(ctx, invite.Org, mdb.Member{
-				Key:      dev.Key,
-				Username: dev.Username,
-				Role:     mdb.OrgMember,
-			}); err != nil {
-				if err == mongo.ErrNoDocuments {
-					if err := g.collections.Invites.Delete(ctx, invite.Token); err != nil {
-						renderError(c, http.StatusInternalServerError, err)
-
-					} else {
-						renderError(c, http.StatusNotFound, fmt.Errorf("org not found"))
-					}
-				} else {
-					renderError(c, http.StatusInternalServerError, err)
-				}
-				return
-			}
-			if err = g.collections.Invites.Delete(ctx, invite.Token); err != nil {
-				renderError(c, http.StatusInternalServerError, err)
-				return
-			}
-		}
-	}
-	c.HTML(http.StatusOK, "/public/html/consent.gohtml", gin.H{
-		"Org":   invite.Org,
-		"Email": invite.EmailTo,
-	})
 }
 
 // render404 renders the 404 template.
@@ -349,7 +209,7 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 	key := parts[0]
 
 	// Render buckets if the domain matches
-	if g.bucketsDomain != "" && strings.HasSuffix(c.Request.Host, g.bucketsDomain) {
+	if g.domain != "" && strings.HasSuffix(c.Request.Host, g.domain) {
 		g.renderWWWBucket(c, key)
 		return
 	}

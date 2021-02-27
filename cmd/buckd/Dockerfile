@@ -1,4 +1,4 @@
-FROM golang:1.15.5-buster
+FROM golang:1.16.0-buster
 MAINTAINER Textile <contact@textile.io>
 
 # This is (in large part) copied (with love) from
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
   libssl-dev \
   ca-certificates
 
-ENV SRC_DIR /textile
+ENV SRC_DIR /go-buckets
 
 # Download packages first so they can be cached.
 COPY go.mod go.sum $SRC_DIR/
@@ -20,7 +20,7 @@ COPY . $SRC_DIR
 
 # Build the thing.
 RUN cd $SRC_DIR \
-  && TXTL_BUILD_FLAGS="CGO_ENABLED=0 GOOS=linux" make build-buckd
+  && BIN_BUILD_FLAGS="CGO_ENABLED=0 GOOS=linux" make build-buckd
 
 # Get su-exec, a very minimal tool for dropping privileges,
 # and tini, a very minimal init daemon for containers
@@ -45,8 +45,8 @@ RUN set -eux; \
 FROM busybox:1.31.1-glibc
 LABEL maintainer="Textile <contact@textile.io>"
 
-# Get the textile binary, entrypoint script, and TLS CAs from the build container.
-ENV SRC_DIR /textile
+# Get the binary, entrypoint script, and TLS CAs from the build container.
+ENV SRC_DIR /go-buckets
 COPY --from=0 $SRC_DIR/buckd /usr/local/bin/buckd
 COPY --from=0 /tmp/su-exec/su-exec-static /sbin/su-exec
 COPY --from=0 /tmp/tini /sbin/tini
@@ -60,13 +60,11 @@ COPY --from=0 /usr/lib/*-linux-gnu*/libssl.so* /usr/lib/
 COPY --from=0 /usr/lib/*-linux-gnu*/libcrypto.so* /usr/lib/
 
 # addrApi; can be exposed to the public.
-EXPOSE 3006
+EXPOSE 5000
 # addrApiProxy; can be exposed to the public.
-EXPOSE 3007
-# addrThreadsHost; must be exposed to the public.
-EXPOSE 4006
-# addrGatewayHost; can be exposed to the public.
-EXPOSE 8006
+EXPOSE 5050
+# addrGateway; can be exposed to the public.
+EXPOSE 8000
 
 # Create the repo directory.
 ENV BUCKETS_PATH /data/buckets
@@ -83,4 +81,4 @@ VOLUME $BUCKETS_PATH
 
 ENTRYPOINT ["/sbin/tini", "--", "buckd"]
 
-CMD ["--repo=/data/buckets"]
+CMD ["--datastoreBadgerRepo=/data/buckets"]

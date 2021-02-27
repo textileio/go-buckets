@@ -5,12 +5,14 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 
 	aurora2 "github.com/logrusorgru/aurora"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
-	"github.com/textileio/textile/v2/buckets/local"
-	"github.com/textileio/textile/v2/cmd"
+	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/cmd"
+	"github.com/textileio/go-buckets/local"
 )
 
 const Name = "buck"
@@ -38,15 +40,13 @@ func Init(baseCmd *cobra.Command) {
 		pushCmd,
 		pullCmd,
 		addCmd,
-		watchCmd,
+		//watchCmd,
 		catCmd,
 		destroyCmd,
 		encryptCmd,
 		decryptCmd,
-		archiveCmd,
 		rolesCmd,
 	)
-	archiveCmd.AddCommand(defaultArchiveConfigCmd, setDefaultArchiveConfigCmd, archiveWatchCmd, archiveLsCmd)
 	rolesCmd.AddCommand(rolesGrantCmd, rolesLsCmd)
 
 	baseCmd.PersistentFlags().String("key", "", "Bucket key")
@@ -60,8 +60,6 @@ func Init(baseCmd *cobra.Command) {
 	initCmd.Flags().Bool("hard", false, "Discards all local changes if true")
 	initCmd.Flags().BoolP("yes", "y", false, "Skips the confirmation prompt if true")
 	initCmd.Flags().BoolP("quiet", "q", false, "Write minimal output")
-	// (jsign): disabled until this feature is usable in mainnet.
-	// initCmd.Flags().Bool("unfreeze", false, "Unfreeze --cid from a known or imported deals in Filecoin.")
 
 	pushCmd.Flags().BoolP("force", "f", false, "Allows non-fast-forward updates if true")
 	pushCmd.Flags().BoolP("yes", "y", false, "Skips the confirmation prompt if true")
@@ -76,9 +74,6 @@ func Init(baseCmd *cobra.Command) {
 
 	encryptCmd.Flags().StringP("password", "p", "", "Encryption password")
 	decryptCmd.Flags().StringP("password", "p", "", "Decryption password")
-
-	archiveCmd.Flags().StringP("file", "f", "", "Optional path to a file containing archive config json that will override the default")
-	archiveCmd.Flags().BoolP("yes", "y", false, "Skips the confirmation prompt if true")
 
 	rolesGrantCmd.Flags().StringP("role", "r", "", "Access role: none, reader, writer, admin")
 
@@ -101,9 +96,9 @@ var getCmd = &cobra.Command{
 		defer cancel()
 		buck, err := bucks.GetLocalBucket(ctx, conf)
 		cmd.ErrCheck(err)
-		info, err := buck.Info(ctx)
+		info, err := buck.Get(ctx)
 		cmd.ErrCheck(err)
-		cmd.JSON(info)
+		cmd.RenderJSON(info)
 	},
 }
 
@@ -117,7 +112,7 @@ var existingCmd = &cobra.Command{
 		cmd.ErrCheck(err)
 		ctx, cancel := context.WithTimeout(context.Background(), cmd.Timeout)
 		defer cancel()
-		list, err := bucks.RemoteBuckets(ctx, conf.Thread)
+		list, err := bucks.RemoteBuckets(ctx, conf.Thread, conf.Identity)
 		cmd.ErrCheck(err)
 		var data [][]string
 		if len(list) > 0 {
@@ -126,7 +121,7 @@ var existingCmd = &cobra.Command{
 					item.Name,
 					item.Thread.String(),
 					item.Key,
-					item.Path.Cid().String(),
+					strings.TrimPrefix(item.Path, "/ipfs/"),
 				})
 			}
 		}
@@ -214,10 +209,10 @@ var linksCmd = &cobra.Command{
 	},
 }
 
-func printLinks(reply local.Links, format Format) {
+func printLinks(reply buckets.Links, format Format) {
 	switch format {
 	case JSONFormat:
-		cmd.JSON(reply)
+		cmd.RenderJSON(reply)
 	default:
 		cmd.Message("Your bucket links:")
 		cmd.Message("%s Thread link", aurora.White(reply.URL).Bold())

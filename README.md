@@ -1,206 +1,111 @@
-# textile
+# go-buckets
 
 [![Made by Textile](https://img.shields.io/badge/made%20by-Textile-informational.svg?style=popout-square)](https://textile.io)
 [![Chat on Slack](https://img.shields.io/badge/slack-slack.textile.io-informational.svg?style=popout-square)](https://slack.textile.io)
-[![GitHub license](https://img.shields.io/github/license/textileio/textile.svg?style=popout-square)](./LICENSE)
-[![GitHub action](https://github.com/textileio/textile/workflows/Tests/badge.svg?style=popout-square)](https://github.com/textileio/textile/actions)
+[![GitHub license](https://img.shields.io/github/license/textileio/go-buckets.svg?style=popout-square)](./LICENSE)
+[![GitHub action](https://github.com/textileio/go-buckets/workflows/Test/badge.svg?style=popout-square)](https://github.com/textileio/go-buckets/actions)
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=popout-square)](https://github.com/RichardLitt/standard-readme)
 
-> Textile hub services and buckets lib
-
-Textile connects and extends [Libp2p](https://libp2p.io/), [IPFS](https://ipfs.io/), and [Filecoin](https://filecoin.io/). Three interoperable technologies makeup Textile:
-
-* [**ThreadDB**](https://github.com/textileio/go-threads): A server-less p2p database built on Libp2p
-* [**Powergate**](https://github.com/textileio/powergate): File storage built on Filecoin and IPFS
-* [**Buckets**](https://github.com/textileio/textile/tree/master/buckets): File and dynamic directory storage built on ThreadDB, Powergate, and [UnixFS](https://github.com/ipfs/go-unixfs).
+> File and dynamic directory storage built on Threads, IPFS, and LibP2P
 
 Join us on our [public Slack channel](https://slack.textile.io/) for news, discussions, and status updates. [Check out our blog](https://medium.com/textileio) for the latest posts and announcements.
 
 ## Table of Contents
 
-- [textile](#textile)
-  - [Security](#security)
-  - [Background](#background)
-  - [Install](#install)
-    - [The Hub](#the-hub)
-      - [`hubd`](#hubd)
-      - [`hub`](#hub)
-    - [Buckets](#buckets)
-      - [`buckd`](#buckd)
-      - [`buck`](#buck)
-    - [The Buckets Library](#the-buckets-library)
-  - [Getting Started](#getting-started)
-    - [The Hub](#the-hub-1)
-    - [Running Buckets](#running-buckets)
-    - [Creating a bucket](#creating-a-bucket)
-    - [Creating a private bucket](#creating-a-private-bucket)
-    - [Adding files and folders to a bucket](#adding-files-and-folders-to-a-bucket)
-    - [Recreating an existing bucket](#recreating-an-existing-bucket)
-    - [Creating a bucket from an existing Cid](#creating-a-bucket-from-an-existing-cid)
-    - [Exploring bucket contents](#exploring-bucket-contents)
-    - [Resetting bucket contents](#resetting-bucket-contents)
-    - [Watching a bucket for changes](#watching-a-bucket-for-changes)
-    - [Protecting a file with a password](#protecting-a-file-with-a-password)
-    - [Sharing bucket files and folders](#sharing-bucket-files-and-folders)
-    - [Creating a Filecoin bucket archive](#creating-a-filecoin-bucket-archive)
-    - [Multi-writer buckets](#multi-writer-buckets)
-    - [Deleting a bucket](#deleting-a-bucket)
-    - [Using the Buckets Library](#using-the-buckets-library)
-      - [Creating a bucket](#creating-a-bucket-1)
-      - [Getting an existing bucket](#getting-an-existing-bucket)
-      - [Pushing local files](#pushing-local-files)
-      - [Pulling remote changes](#pulling-remote-changes)
-    - [Using the Mail Library](#using-the-mail-library)
-      - [Creating a mailbox](#creating-a-mailbox)
-      - [Getting an existing mailbox](#getting-an-existing-mailbox)
-      - [Sending a message](#sending-a-message)
-      - [Watching for new messages](#watching-for-new-messages)
-  - [Developing](#developing)
-  - [Contributing](#contributing)
-  - [Changelog](#changelog)
-  - [License](#license)
+- [Security](#security)
+- [Background](#background)
+- [Install](#install)
+  - [Buckets Core](#buckets-core)
+  - [gRPC Daemon](#grpc-daemon)
+  - [gRPC Client](#grpc-client)
+  - [Client CLI](#client-cli)
+  - [Local-first Library](#local-first-library)
+- [Getting Started](#getting-started)
+  - [Running Buckets](#running-buckets)
+  - [Creating a bucket](#creating-a-bucket)
+  - [Creating a private bucket](#creating-a-private-bucket)
+  - [Adding files and folders to a bucket](#adding-files-and-folders-to-a-bucket)
+  - [Recreating an existing bucket](#recreating-an-existing-bucket)
+  - [Creating a bucket from an existing Cid](#creating-a-bucket-from-an-existing-cid)
+  - [Exploring bucket contents](#exploring-bucket-contents)
+  - [Resetting bucket contents](#resetting-bucket-contents)
+  - [Watching a bucket for changes](#watching-a-bucket-for-changes)
+  - [Protecting a file with a password](#protecting-a-file-with-a-password)
+  - [Sharing bucket files and folders](#sharing-bucket-files-and-folders)
+  - [Multi-writer buckets](#multi-writer-buckets)
+  - [Deleting a bucket](#deleting-a-bucket)
+- [Using the Local Library](#using-the-local-library)
+  - [Creating a bucket](#creating-a-bucket-1)
+  - [Getting an existing bucket](#getting-an-existing-bucket)
+  - [Pushing local files](#pushing-local-files)
+  - [Pulling remote changes](#pulling-remote-changes)
+- [Developing](#developing)
+- [Contributing](#contributing)
+- [Changelog](#changelog)
+- [License](#license)
 
 ## Security
 
-Textile is still under heavy development and no part of it should be used before a thorough review of the underlying code and an understanding APIs and protocols may change rapidly. There may be coding mistakes, and the underlying protocols may contain design flaws. Please [let us know](mailto:contact@textile.io) immediately if you have discovered a security vulnerability.
+Buckets is still under heavy development and no part of it should be used before a thorough review of the underlying code and an understanding APIs and protocols may change rapidly. There may be coding mistakes, and the underlying protocols may contain design flaws. Please [let us know](mailto:contact@textile.io) immediately if you have discovered a security vulnerability.
 
 Please also read the [security note](https://github.com/ipfs/go-ipfs#security-issues) for [go-ipfs](https://github.com/ipfs/go-ipfs).
 
 ## Background
 
-Go to [the docs](https://docs.textile.io/) for more about the motivations behind Textile.
+Buckets provide a dynamic wrapper around [UnixFS]([UnixFS](https://github.com/ipfs/go-unixfs)) directories with auto-updating IPNS, static website rendering, access control, and encryption.
 
 ## Install
 
-This repo contains two service daemons with CLIs and a Buckets Library for building local-first apps and services.
-
-### The Hub
-
-#### `hubd`
-
--   **Prebuilt package**: See [release assets](https://github.com/textileio/textile/releases/latest)
--   **Docker image**: See the `latest` tag on [Docker Hub](https://hub.docker.com/r/textile/textile/tags)
--   **Build from the source**:
+### Buckets Core
 
 ```
-git clone https://github.com/textileio/textile
-cd textile
-go get ./cmd/hubd
+go get github.com/textileio/go-buckets
 ```
 
-#### `hub`
+### gRPC Daemon
 
--   **Prebuilt package**: See [release assets](https://github.com/textileio/textile/releases/latest)
+-   **Prebuilt package**: See [release assets](https://github.com/textileio/go-buckets/releases/latest)
+-   **Docker image**: See the `buckets` tag on [Docker Hub](https://hub.docker.com/r/textile/go-buckets/tags)
 -   **Build from the source**: 
 
 ```
-git clone https://github.com/textileio/textile
-cd textile
-go get ./cmd/hub
-```
-
-**Note**: `hub` _includes_ `buck` as a subcommand: `hub buck`. This is because `hubd` hosts `buckd`, along with other services.
-
-`hub` is built in part on the [gRPC client](https://pkg.go.dev/github.com/textileio/textile/v2/api/hub/client), which can be imported to an existing project:
-
-```
-import "github.com/textileio/textile/v2/api/hub/client"
-```
-
-### Buckets
-
-#### `buckd`
-
--   **Prebuilt package**: See [release assets](https://github.com/textileio/textile/releases/latest)
--   **Docker image**: See the `buckets` tag on [Docker Hub](https://hub.docker.com/r/textile/textile/tags)
--   **Build from the source**: 
-
-```
-git clone https://github.com/textileio/textile
-cd textile
+git clone https://github.com/textileio/go-buckets
+cd go-buckets
 go get ./cmd/buckd
 ```
 
-#### `buck`
+### gRPC Client
 
--   **Prebuilt package**: See [release assets](https://github.com/textileio/textile/releases/latest)
+```
+go get github.com/textileio/go-buckets/api/client
+```
+
+### Client CLI
+
+-   **Prebuilt package**: See [release assets](https://github.com/textileio/go-buckets/releases/latest)
 -   **Build from the source**: 
 
 ```
-git clone https://github.com/textileio/textile
-cd textile
+git clone https://github.com/textileio/go-buckets
+cd go-buckets
 go get ./cmd/buck
 ```
 
-`buck` is built in part on the [gRPC client](https://pkg.go.dev/github.com/textileio/textile/v2/api/buckets/client), which can be imported in an existing project:
+### Local-first Library
 
 ```
-import "github.com/textileio/textile/v2/api/buckets/client"
+import "github.com/textileio/go-buckets/local"
 ```
 
-### The Buckets Library
-
-```
-import "github.com/textileio/textile/v2/buckets/local"
-```
-
-The full spec is available [here](https://pkg.go.dev/github.com/textileio/textile/v2/buckets/local).
+See [Using the Local Library](#using-the-local-library) for more info.
 
 ## Getting Started
 
-### The Hub
-
-The Hub daemon (`hubd`), a.k.a. _The Hub_, is a hosted wrapper around other Textile services that includes developer accounts for individuals and organizations. You are free to run your own, but we encourage the use of the official [Textile Hub](https://docs.textile.io/hub/).
-
-The layout of the `hub` client CLI mirrors the services wrapped by `hubd`:
-
--   `hub threads` provides limited access to ThreadDB.
--   `hub buck` provides access to Buckets (`buckd`) by wrapping the standalone `buck` CLI.
--   `hub buck archive` provides limited access to The Hub's hosted Powergate instance, and the Filecoin network.
-
-Try `hub --help` for more usage.
-
-```
-The Hub Client.
-
-Usage:
-  hub [command]
-
-Available Commands:
-  billing     Billing management
-  buck        Manage an object storage bucket
-  destroy     Destroy your account
-  fil         Interact with Filecoin related commands.
-  help        Help about any command
-  init        Initialize account
-  keys        API key management
-  login       Login
-  logout      Logout
-  orgs        Org management
-  threads     Thread management
-  update      Update the hub CLI
-  version     Show current version
-  whoami      Show current user
-
-Flags:
-      --api string        API target (default "api.hub.textile.io:443")
-  -h, --help              help for hub
-      --identity string   User identity
-      --key string        User API key
-      --newIdentity       Generate a new user identity
-  -o, --org string        Org username
-      --secret string     User API secret
-  -s, --session string    User session token
-      --token string      User identity token
-
-Use "hub [command] --help" for more information about a command.
-```
-
-Read more about The Hub, including how to [create an account](https://docs.textile.io/hub/accounts/#account-setup), in the [docs](https://docs.textile.io/hub/).
+This section focusses on interacting with buckets using a local daemon and the `buck` CLI. If your application doesn't require a daemon, you can use the [core library](https://github.com/textileio/go-buckets/blob/master/buckets.go) directly.
 
 ### Running Buckets
 
-Much like [`threadsd`](https://github.com/textileio/go-threads/tree/master/threadsd), the `buckd` daemon can be run as a server or alongside desktop apps or command-line tools. The easiest way to run `buckd` is by using the provided Docker Compose files. If you're new to Docker and/or Docker Compose, get started [here](https://docs.docker.com/compose/gettingstarted/). Once you are setup, you should have `docker-compose` in your `PATH`.
+The `buckd` daemon can be run as a server or alongside desktop apps or command-line tools. The easiest way to run `buckd` is by using the provided Docker Compose files. If you're new to Docker and/or Docker Compose, get started [here](https://docs.docker.com/compose/gettingstarted/). You should have `docker-compose` in your `PATH`.
 
 Create an `.env` file and add the following values:  
 
@@ -209,7 +114,7 @@ REPO_PATH=~/myrepo
 BUCK_LOG_DEBUG=true
 ```
 
-Copy [this compose file](https://github.com/textileio/textile/blob/master/cmd/buckd/docker-compose.yml) and run it with the following command.
+Copy [this compose file](https://github.com/textileio/go-buckets/blob/master/cmd/buckd/docker-compose.yml) and run it with the following command.
 
 ```
 docker-compose -f docker-compose.yml up
@@ -217,13 +122,9 @@ docker-compose -f docker-compose.yml up
 
 Congrats! Now you have Buckets running locally.
 
-The Docker Compose file starts an IPFS node, which is used to pin bucket files and folders. You could point `buckd` to a different (possibly remote) IPFS node by setting the `BUCK_ADDR_IPFS_API` variable to a different multiaddress.  
-
-By default, this approach does not start [Powergate](https://github.com/textileio/powergate). If you do, be sure to set the `BUCK_ADDR_POWERGATE_API` variable to the multiaddress of your Powergate. `buckd` must be configured with Powergate to enable Filecoin archiving with `buck archive`.
+The Docker Compose file starts an IPFS node, which is used to pin bucket files and folders. You could point `buckd` to a different (possibly remote) IPFS node by setting the `BUCK_IPFS_MULTIADDR` variable to a different multiaddress.
 
 ### Creating a bucket
-
-Since `hub buck` and `buck` are functionally identical, this section will focus on `buck` and the Buckets Library using a locally running `buckd`.
 
 First off, take a look at `buck --help`.
 
@@ -237,7 +138,6 @@ Usage:
 
 Available Commands:
   add         Add adds a UnixFs DAG locally at path
-  archive     Create a Filecoin archive
   cat         Cat bucket objects at path
   decrypt     Decrypt bucket objects at path with password
   destroy     Destroy bucket and all objects
@@ -259,7 +159,7 @@ Flags:
 Use "buck [command] --help" for more information about a command.
 ```
 
-A Textile bucket functions a bit like an S3 bucket. It's a virtual filesystem where you can push, pull, list, and cat files. You can share them via web links or render the whole thing as a website or web app. They also function a bit like a Git repository. The point of entry is from a folder on your local machine that is synced to a _remote_.
+A bucket functions a bit like an S3 bucket. It's a virtual filesystem where you can push, pull, list, and cat files. You can share them via web links or render the whole thing as a website or web app. They also function a bit like a Git repository. The point of entry is from a folder on your local machine that is synced to a _remote_.
 
 To get started, initialize a new bucket.
 
@@ -273,8 +173,8 @@ When prompted, give your bucket a name and either opt-in or decline bucket encyp
 You should now see two links for the new bucket on the locally running gateway.
 
 ```
-> http://127.0.0.1:8006/thread/bafkq3ocmdkrljadlgybtvocytpdw4hbnzygxecxehdp7pfj32lxp34a/buckets/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi Thread link
-> http://127.0.0.1:8006/ipns/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi IPNS link (propagation can be slow)
+> http://127.0.0.1:8000/thread/bafkq3ocmdkrljadlgybtvocytpdw4hbnzygxecxehdp7pfj32lxp34a/buckets/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi Thread link
+> http://127.0.0.1:8000/ipns/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi IPNS link (propagation can be slow)
 > Success! Initialized /path/to/mybucket as a new empty bucket
 ```
 
@@ -342,7 +242,7 @@ The output shows the Cid of the added file and the bucket's new root Cid.
 
 It's often useful to recreate a bucket from the remote. This is somewhat like re-cloning a Git repo. This can be done in a different location on the same machine, or, if `buckd` has a public IP address, from a completely different machine.
 
-Let's recreate the bucket from the previous step in a new directory outside of the original bucket.
+Let's recreate the bucket from the previous step in a new directory.
 
 ```
 mkdir mybucket2 && cd mybucket2
@@ -356,17 +256,15 @@ The `--existing` flag allows for interactively selecting an existing bucket to i
   ▸ MyBucket bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi
 ```
 
-At this point, there's only one bucket to choose from. 
-
-**Note**: If `buckd` was running inside The Hub (`hubd`), you would be able to choose from buckets belonging to your Organizations and well as your individual Developer account by using the `--org` flag. Read more about Hub Accounts and Organizations [here](https://docs.textile.io/hub/accounts/).
+At this point, there's only one bucket to choose from.
 
 ```
 > Selected bucket MyBucket
 + hello.txt: bafkreifjjcie6lypi6ny7amxnfftagclbuxndqonfipmb64f2km2devei4
 + .textileseed: bafkreifbdzttoqsch5j66hfmcbsic6qvwrikibgzfbg3tn7rc3j63ukk3u
 > Your bucket links:
-> http://127.0.0.1:8006/thread/bafkq3ocmdkrljadlgybtvocytpdw4hbnzygxecxehdp7pfj32lxp34a/buckets/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi Thread link
-> http://127.0.0.1:8006/ipns/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi IPNS link (propagation can be slow)
+> http://127.0.0.1:8000/thread/bafkq3ocmdkrljadlgybtvocytpdw4hbnzygxecxehdp7pfj32lxp34a/buckets/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi Thread link
+> http://127.0.0.1:8000/ipns/bafzbeifyzfm3kosie25s5qthvvcjrr42ivd7doqhwvu5m4ks7uqv4j5lyi IPNS link (propagation can be slow)
 > Success! Initialized /path/to/mybucket2 from an existing bucket
 ```
 
@@ -533,7 +431,7 @@ Try `buck pull --help` for more options when pulling the remote.
 
 ### Watching a bucket for changes
 
-So far we've seen how a bucket can change locally, but the remote can also change. This could happen for a couple reasons:
+So far we've seen how a bucket can change locally, but the remote can also change. This could happen for a couple of reasons:
 
 * Changes are pushed from a different bucket copy against the same `buckd`.
 * Changes are pushed from a different `buckd` at the ThreadDB layer. This is known as a multi-writer scenario. See [Multi-writer buckets](#multi-writer-buckets) for more.
@@ -589,12 +487,12 @@ Looks like it worked!
 
 ### Sharing bucket files and folders
 
-Bucket contents can be shared with other Hub accounts and users using the `buck roles` command. Each file and folder in a bucket maintains a set of public-key based access roles: `None`, `Reader`, `Writer`, and `Admin`. Only the `Admin` role can add and remove files and folders from a shared path. See `hub buck roles grant --help` for more about each role. For most applications, access roles only makes sense in the context of the Hub.
+Bucket contents can be shared with other users using the `buck roles` command. Each file and folder in a bucket maintains a set of public-key based access roles: `None`, `Reader`, `Writer`, and `Admin`. Only the `Admin` role can add and remove files and folders from a shared path. See `buck roles grant --help` for more about each role.
 
 By default, public buckets have two roles located at the top-level path:
 
 ```
-hub buck roles ls
+buck roles ls
 
   IDENTITY                                                     ROLE
   *                                                            Reader
@@ -608,7 +506,7 @@ Since access roles are inherited down a bucket path, the single admin role grant
 Private buckets are not open to the world and are created with only the single admin role. However, we can still grant default (`*`) `Read` access to individual files, folders, or the entire bucket posteriori.
 
 ```
-hub buck roles grant "*" myfolder
+buck roles grant "*" myfolder
 Use the arrow keys to navigate: ↓ ↑ → ←
 ? Select a role:
   None
@@ -620,7 +518,7 @@ Use the arrow keys to navigate: ↓ ↑ → ←
 We can now see a new role added to `myfolder`.
 
 ```
- hub buck roles ls myfolder
+buck roles ls myfolder
 
   IDENTITY  ROLE
   *         Reader
@@ -630,108 +528,23 @@ We can now see a new role added to `myfolder`.
 
 Similarly, grant the `None` role to revoke access.
 
-Manipulating access roles for a single Hub account or user (public key) can be cumbersome with the `buck` CLI. Applications in need of this level of granular access control should do so programmatically using the [Go client](https://pkg.go.dev/github.com/textileio/textile/v2/api/buckets/client), [JavaScript client](https://textileio.github.io/js-hub/docs/hub.buckets).
-
-### Creating a Filecoin bucket archive
-
-Bucket archiving requires a Powergate to be running in `buckd`. If you're curious how to do this, take a look at [this Docker Compose file](https://github.com/textileio/textile/blob/master/integrationtest/pg/docker-compose.yml).
-
-Let's try archiving the bucket from the [Creating a bucket](#creating-a-bucket) section.
-
-```
-buck archive
-> Warning! Archives are Filecoin Mainnet. Use with caution.
-? Proceed? [y/N]
-```
-
-Please take note of the warning. Archiving should be considered experimental since Filecoin `mainnet` has not yet launched, and Powergate will either be running a `localnet` or `mainnet`.
-
-You should see a success message if you proceed.
-
-```
-> Success! Archive queued successfully
-```
-
-This means that archiving has been initiated. It may take some time to complete...
-
-```
-buck archive status
-> Archive is currently executing, grab a coffee and be patient...
-```
-
-Use the `archive status` command with `-w` to watch the progress of your archive as it moves through the Filecoin market deal stages.
-
-```
-buck archive status -w
-> Archive is currently executing, grab a coffee and be patient...
->    Pushing new configuration...
->    Configuration saved successfully
->    Executing job 1006707f-efa8-48c2-98af-a1b320a59780...
->    Ensuring Hot-Storage satisfies the configuration...
->    No actions needed in Hot Storage.
->    Hot-Storage execution ran successfully.
->    Ensuring Cold-Storage satisfies the configuration...
->    Current replication factor is lower than desired, making 10 new deals...
->    Calculating piece size...
->    Estimated piece size is 256 bytes.
->    Proposing deal to miner t01459 with 0 fil per epoch...
->    Proposing deal to miner t0117734 with 500000000 fil per epoch...
->    Proposing deal to miner t0120993 with 500000000 fil per epoch...
->    Proposing deal to miner t0120642 with 500000000 fil per epoch...
->    Proposing deal to miner t0121477 with 500000000 fil per epoch...
->    Proposing deal to miner t0119390 with 500000000 fil per epoch...
->    Proposing deal to miner t0101180 with 10000000 fil per epoch...
->    Proposing deal to miner t0117803 with 500000000 fil per epoch...
->    Proposing deal to miner t0121852 with 500000000 fil per epoch...
->    Proposing deal to miner t0119822 with 500000000 fil per epoch...
->    Watching deals unfold...
->    Deal with miner t0117803 changed state to StorageDealClientFunding
->    Deal with miner t0121852 changed state to StorageDealClientFunding
->    Deal with miner t0121477 changed state to StorageDealClientFunding
->    Deal with miner t0101180 changed state to StorageDealClientFunding
->    Deal with miner t0119822 changed state to StorageDealClientFunding
->    Deal with miner t0119390 changed state to StorageDealClientFunding
->    Deal with miner t0120642 changed state to StorageDealClientFunding
->    Deal with miner t0117734 changed state to StorageDealClientFunding
->    Deal with miner t01459 changed state to StorageDealClientFunding
->    Deal with miner t0120993 changed state to StorageDealClientFunding
->    Deal with miner t0121477 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0119822 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0117734 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0121852 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t01459 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0120642 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0120993 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0117803 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0101180 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t0119390 changed state to StorageDealWaitingForDataRequest
->    Deal with miner t01459 changed state to StorageDealProposalAccepted
->    Deal with miner t01459 changed state to StorageDealSealing
-```
-
-The output will look something like the above. With a little luck, you will start seeing some successful storage deals.
-
-Bucket archiving allows you to leverage the purely decentralized nature of Filecoin in your buckets. Check out [this video](https://www.youtube.com/watch?v=jiBUxIi1zko&feature=emb_title) from a [blog post](https://blog.textile.io/buckets-diffing-syncing-archiving/) demonstrating Filecoin bucket recovery using the [Lotus client](https://github.com/filecoin-project/lotus).
-
 ### Multi-writer buckets
 
-Multi-writer buckets leverage the distributed nature of ThreadDB by allowing multiple identities to write to the same bucket hosted by different Libp2p hosts. Since buckets are ThreadDB collection _instances_, this is no different than normal ThreadDB peer collaboration.
-
-To-do: Demonstrate joining a bucket from a ThreadDB invite.
+Multi-writer buckets leverage the distributed nature of ThreadDB by allowing multiple identities to write to the same bucket hosted by different Libp2p hosts. Since buckets are ThreadDB collection _instances_, this is no different from normal ThreadDB peer collaboration.
 
 ### Deleting a bucket
 
-Deleting a bucket is easy... and permanent! `buck destroy` will delete your local bucket as well as the remote, making it unrecoverable with `buck init --existing`.
+Deleting a bucket is easy—and permanent! `buck destroy` will delete your local bucket as well as the remote, making it unrecoverable with `buck init --existing`.
 
-### Using the Buckets Library
+### Using the Local Library
 
-The `buckets/local` library powers both the `buck` and `hub buck` CLIs. Everything possible in `buck`, from bucket diffing, pushing, pulling, watching, archiving, etc., is available to you in existing projects by importing the Buckets Library.
+The `local` library powers both the `buck` CLI. Everything possible in `buck`, from bucket diffing, pushing, pulling, watching, archiving, etc., is available to you in existing projects by importing the Local Library.
 
 ```
-go get github.com/textileio/textile/v2/buckets/local
+go get github.com/textileio/go-buckets/local
 ```
 
-Visit the [GoDoc](https://pkg.go.dev/github.com/textileio/textile/v2/buckets/local) for a complete list of methods and more usage descriptions.
+Visit the [GoDoc](https://pkg.go.dev/github.com/textileio/go-buckets/local) for a complete list of methods and more usage descriptions.
 
 #### Creating a bucket
 
@@ -752,7 +565,7 @@ diff, err := mybuck.DiffLocal() // diff contains staged changes
 
 `buckets.NewBucket` will write a local config file and data repo.
 
-See `local.WithName`, `local.WithStrategy`, `local.WithPrivate`, `local.WithCid`, `local.WithInitPathEvents` for more options when creating buckets.
+See `local.WithName`, `local.WithStrategy`, `local.WithPrivate`, `local.WithCid`, `local.WithInitEvents` for more options when creating buckets.
 
 To create a bucket from an existing remote, use its thread ID and instance ID (bucket `key`) in the config.
 
@@ -784,101 +597,6 @@ newRoots, err := mybuck.PullRemote()
 
 See `local.PathOption` for more options when pulling.
 
-### Using the Mail Library
-
-The `mail/local` library provides mechanisms for sending and receiving messages between Hub users. Mailboxes are built on ThreadDB.
-
-```
-go get github.com/textileio/textile/v2/mail/local
-```
-
-Visit the [GoDoc](https://pkg.go.dev/github.com/textileio/textile/v2/mail/local) for a complete list of methods and more usage descriptions.
-
-#### Creating a mailbox
-
-Like creating a bucket, create a new mailbox by constructing a configuration object. All fields are required.
-
-```
-// Setup the mail lib
-mail := local.NewMail(cmd.NewClients("api.textile.io:443", true), local.DefaultConfConfig())
-
-// Create a libp2p identity (this can be any thread.Identity)
-privKey, _, err := crypto.GenerateEd25519Key(rand.Reader)
-id := thread.NewLibp2pIdentity(privKey)
-
-// Create a new mailbox with config
-mailbox, err := mail.NewMailbox(context.Background(), local.Config{
-    Path: "path/to/mail/folder", // Usually a global location like ~/.textile/mail
-    Identity: id,
-    APIKey: <API_SECRET>,
-    APISecret: <API_KEY>,
-})
-```
-
-`APIKey` and `APISecret` are User Group API Keys. Read more about [creating API Keys](https://docs.textile.io/hub/app-apis/#creating-user-group-keys).
-
-To recreate a user's mailbox, specify the same identity and API Key in the config.
-
-#### Getting an existing mailbox
-
-`GetLocalMailbox` returns the mailbox at path.
-
-```
-mailbox, err := mail.GetLocalMailbox(context.Background(), "path/to/mailbox/folder")
-```
-
-#### Sending a message
-
-When a mailbox sends a message to another mailbox, the message is encrypted for the recipient's inbox _and_ for the senders sentbox. This allows both parties to control the message's lifecycle.
-
-```
-// Create two mailboxes (for most applications, this would not happen on the same machine)
-box1, err := mail.NewMailbox(context.Background(), local.Config{...})
-box2, err := mail.NewMailbox(context.Background(), local.Config{...})
-
-// Send a message from the first mailbox to the second
-message, err := box1.SendMessage(context.Background(), box2.Identity().GetPublic(), []byte("howdy"))
-
-// List the recipient's inbox
-inbox, err := box2.ListInboxMessages(context.Background())
-
-// Open decrypts the message body
-body, err := inbox[0].Open(context.Background(), box2.Identity())
-
-// Mark the message as read
-err = box2.ReadInboxMessage(context.Background(), inbox[0].ID)
-```
-
-#### Watching for new messages
-
-Applications may watch for mailbox events in the inbox and/or sentbox.
-
-```
-// Handle mailbox events as they arrive
-events := make(chan MailboxEvent)
-defer close(events)
-go func() {
-    for e := range events {
-        switch e.Type {
-        case NewMessage:
-            // handle new message
-        case MessageRead:
-            // handle message read (inbox only)
-        case MessageDeleted:
-            // handle message deleted
-        }
-    }
-}()
-
-// Start watching (the third param indicates we want to keep watching when offline)
-state, err := mailbox.WatchInbox(context.Background(), events, true)
-for s := range state {
-    // handle connectivity state
-}
-```
-
-Similarly, use `WatchSentbox` to watch a sentbox.
-
 ## Developing
 
 The easiest way to develop against `hubd` or `buckd` is to use the Docker Compose files found in `cmd`. The `-dev` flavored files do not persist repos via Docker Volumes, which may be desirable in some cases.
@@ -890,13 +608,13 @@ Pull requests and bug reports are very welcome ❤️
 This repository falls under the Textile [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 Feel free to get in touch by:
--   [Opening an issue](https://github.com/textileio/textile/issues/new)
+-   [Opening an issue](https://github.com/textileio/go-buckets/issues/new)
 -   Joining the [public Slack channel](https://slack.textile.io/)
 -   Sending an email to contact@textile.io
 
 ## Changelog
 
-A changelog is published along with each [release](https://github.com/textileio/textile/releases).
+A changelog is published along with each [release](https://github.com/textileio/go-buckets/releases).
 
 ## License
 

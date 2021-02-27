@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
 	"runtime"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,179 +15,58 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/require"
-	billing "github.com/textileio/textile/v2/api/billingd/service"
-	"github.com/textileio/textile/v2/api/hubd/client"
-	pb "github.com/textileio/textile/v2/api/hubd/pb"
-	"github.com/textileio/textile/v2/core"
-	"github.com/textileio/textile/v2/util"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/api/common"
+	"github.com/textileio/go-buckets/ipns"
+	"github.com/textileio/go-buckets/util"
+	dbc "github.com/textileio/go-threads/api/client"
+	"github.com/textileio/go-threads/core/did"
+	tdb "github.com/textileio/go-threads/db"
+	nc "github.com/textileio/go-threads/net/api/client"
 )
 
-const SessionSecret = "hubsession"
-
-func MakeTextile(t *testing.T) core.Config {
-	conf := DefaultTextileConfig(t)
-	MakeTextileWithConfig(t, conf)
-	return conf
-}
-
-func DefaultTextileConfig(t util.TestingTWithCleanup) core.Config {
-	apiPort, err := freeport.GetFreePort()
-	require.NoError(t, err)
-	gatewayPort, err := freeport.GetFreePort()
+func NewService(t *testing.T) (listenAddr string, host did.DID) {
+	threadsAddr := GetThreadsApiAddr()
+	net, err := nc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
 	require.NoError(t, err)
 
-	return core.Config{
-		Hub:                       true,
-		Debug:                     true,
-		AddrAPI:                   util.MustParseAddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", apiPort)),
-		AddrAPIProxy:              util.MustParseAddr("/ip4/0.0.0.0/tcp/0"),
-		AddrMongoURI:              GetMongoUri(),
-		AddrMongoName:             util.MakeToken(12),
-		AddrThreadsHost:           util.MustParseAddr("/ip4/0.0.0.0/tcp/0"),
-		AddrIPFSAPI:               GetIPFSApiAddr(),
-		AddrGatewayHost:           util.MustParseAddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", gatewayPort)),
-		AddrGatewayURL:            fmt.Sprintf("http://127.0.0.1:%d", gatewayPort),
-		IPNSRepublishSchedule:     "0 1 * * *",
-		IPNSRepublishConcurrency:  5,
-		CustomerioAPIKey:          os.Getenv("CUSTOMERIO_API_KEY"),
-		CustomerioConfirmTmpl:     os.Getenv("CUSTOMERIO_CONFIRM_TMPL"),
-		CustomerioInviteTmpl:      os.Getenv("CUSTOMERIO_INVITE_TMPL"),
-		EmailSessionSecret:        SessionSecret,
-		MaxBucketArchiveRepFactor: 4,
-	}
-}
-
-type Options struct {
-	RepoPath       string
-	NoAutoShutdown bool
-}
-
-type Option func(*Options)
-
-func WithRepoPath(repoPath string) Option {
-	return func(o *Options) {
-		o.RepoPath = repoPath
-	}
-}
-
-func WithoutAutoShutdown() Option {
-	return func(o *Options) {
-		o.NoAutoShutdown = true
-	}
-}
-
-func MakeTextileWithConfig(t util.TestingTWithCleanup, conf core.Config, opts ...Option) func() {
-	var args Options
-	for _, opt := range opts {
-		opt(&args)
-	}
-	if args.RepoPath == "" {
-		args.RepoPath = t.TempDir()
-	}
-	textile, err := core.NewTextile(context.Background(), conf, core.WithBadgerThreadsPersistence(args.RepoPath))
-	require.NoError(t, err)
-	time.Sleep(5 * time.Second) // Give the api a chance to get ready
-	done := func() {
-		time.Sleep(time.Second) // Give threads a chance to finish work
-		err := textile.Close()
-		require.NoError(t, err)
-	}
-	if !args.NoAutoShutdown {
-		t.Cleanup(done)
-	}
-	return done
-}
-
-func DefaultBillingConfig(t util.TestingTWithCleanup) billing.Config {
-	apiPort, err := freeport.GetFreePort()
-	require.NoError(t, err)
-	gatewayPort, err := freeport.GetFreePort()
+	// @todo: Fix me
+	doc, err := net.GetServices(context.Background())
 	require.NoError(t, err)
 
-	return billing.Config{
-		ListenAddr:             util.MustParseAddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", apiPort)),
-		StripeAPIURL:           "https://api.stripe.com",
-		StripeAPIKey:           os.Getenv("STRIPE_API_KEY"),
-		StripeSessionReturnURL: "http://127.0.0.1:8006/dashboard",
-		SegmentAPIKey:          os.Getenv("SEGMENT_API_KEY"),
-		SegmentPrefix:          "test_",
-		DBURI:                  GetMongoUri(),
-		DBName:                 util.MakeToken(8),
-		GatewayHostAddr:        util.MustParseAddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", gatewayPort)),
-		Debug:                  true,
-	}
-}
+	db, err := dbc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
+	require.NoError(t, err)
+	ipfs, err := httpapi.NewApi(GetIPFSApiAddr())
+	require.NoError(t, err)
+	ipnsm, err := ipns.NewManager(tdb.NewTxMapDatastore(), ipfs)
+	require.NoError(t, err)
+	lib, err := buckets.NewBuckets(net, db, ipfs, ipnsm, nil)
+	require.NoError(t, err)
 
-func MakeBillingWithConfig(t util.TestingTWithCleanup, conf billing.Config) {
-	api, err := billing.NewService(context.Background(), conf)
+	listenPort, err := freeport.GetFreePort()
 	require.NoError(t, err)
-	err = api.Start()
+	listenAddr = fmt.Sprintf("127.0.0.1:%d", listenPort)
+	server, proxy, err := common.GetServerAndProxy(lib, listenAddr, "127.0.0.1:0")
 	require.NoError(t, err)
+
 	t.Cleanup(func() {
-		err := api.Stop()
-		require.NoError(t, err)
+		require.NoError(t, proxy.Close())
+		server.Stop()
+		require.NoError(t, lib.Close())
+		require.NoError(t, ipnsm.Close())
+		require.NoError(t, net.Close())
 	})
+
+	return listenAddr, doc.ID
 }
 
-func NewUsername() string {
-	return strings.ToLower(util.MakeToken(12))
-}
-
-func NewEmail() string {
-	return fmt.Sprintf("%s@test.com", NewUsername())
-}
-
-func Signup(t util.TestingTWithCleanup, client *client.Client, conf core.Config, username, email string) *pb.SignupResponse {
-	var err error
-	var res *pb.SignupResponse
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		res, err = client.Signup(context.Background(), username, email)
-		require.NoError(t, err)
-	}()
-	ConfirmEmail(t, conf.AddrGatewayURL, SessionSecret)
-	wg.Wait()
-	require.NotNil(t, res)
-	require.NotEmpty(t, res.Session)
-	return res
-}
-
-func Signin(t *testing.T, client *client.Client, conf core.Config, usernameOrEmail string) *pb.SigninResponse {
-	var err error
-	var res *pb.SigninResponse
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		res, err = client.Signin(context.Background(), usernameOrEmail)
-		require.NoError(t, err)
-	}()
-	ConfirmEmail(t, conf.AddrGatewayURL, SessionSecret)
-	wg.Wait()
-	require.NotNil(t, res)
-	require.NotEmpty(t, res.Session)
-	return res
-}
-
-func ConfirmEmail(t util.TestingTWithCleanup, gurl string, secret string) {
-	time.Sleep(time.Second)
-	url := fmt.Sprintf("%s/confirm/%s", gurl, secret)
-	_, err := http.Get(url)
-	require.NoError(t, err)
-	time.Sleep(time.Second)
-}
-
-// GetMongoUri returns env value or default.
-func GetMongoUri() string {
-	env := os.Getenv("MONGO_URI")
+// GetThreadsApiAddr returns env value or default.
+func GetThreadsApiAddr() string {
+	env := os.Getenv("THREADS_API_ADDR")
 	if env != "" {
 		return env
 	}
-	return "mongodb://127.0.0.1:27017"
+	return "127.0.0.1:4000"
 }
 
 // GetIPFSApiAddr returns env value or default.
@@ -199,11 +75,11 @@ func GetIPFSApiAddr() ma.Multiaddr {
 	if env != "" {
 		return util.MustParseAddr(env)
 	}
-	return util.MustParseAddr("/ip4/127.0.0.1/tcp/5011")
+	return util.MustParseAddr("/ip4/127.0.0.1/tcp/5001")
 }
 
-// StartServices starts local mongodb and ipfs services.
-func StartServices() (cleanup func()) {
+// StartIPFS start an ipfs node.
+func StartIPFS() (cleanup func()) {
 	_, currentFilePath, _, _ := runtime.Caller(0)
 	dirpath := path.Dir(currentFilePath)
 
@@ -272,13 +148,6 @@ func StartServices() (cleanup func()) {
 func checkServices() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
-	mc, err := mongo.Connect(ctx, options.Client().ApplyURI(GetMongoUri()))
-	if err != nil {
-		return err
-	}
-	if err = mc.Ping(ctx, nil); err != nil {
-		return err
-	}
 	ic, err := httpapi.NewApi(GetIPFSApiAddr())
 	if err != nil {
 		return err

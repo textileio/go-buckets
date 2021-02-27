@@ -7,97 +7,31 @@ on:
     branches:
       - master
 jobs:
-  api:
-    name: API
-    runs-on: [self-hosted, hub1]
+  test:
+    name: Test
+    runs-on: [self-hosted, buckets1]
     services:
-      mongodb:
-        image: mongo:latest
+      threads:
+        image: textile/go-threads:534a6d0
         ports:
-          - 127.0.0.1:27018:27017
+          - 4006:4006
+          - 127.0.0.1:4000:5000
+          - 127.0.0.1:4050:5050
       ipfs:
-        image: ipfs/go-ipfs:v0.7.0
+        image: ipfs/go-ipfs:v0.8.0
         env:
           IPFS_PROFILE: test
         ports:
-          - 127.0.0.1:5012:5001
+          - 127.0.0.1:5001:5001
     steps:
       - name: setup
         uses: actions/setup-go@v1
         with:
-          go-version: 1.15
+          go-version: 1.16
       - name: checkout
         uses: actions/checkout@v1
       - name: test
         env:
           SKIP_SERVICES: true
-          MONGO_URI: mongodb://127.0.0.1:27018
-          IPFS_API_ADDR: /ip4/127.0.0.1/tcp/5012
-          STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
-        run: go test -v -timeout 60m -race ./api/... ./mongodb/...
-  buckets:
-    name: Buckets
-    runs-on: [self-hosted, hub2]
-    services:
-      mongodb:
-        image: mongo:latest
-        ports:
-          - 127.0.0.1:27019:27017
-      ipfs:
-        image: ipfs/go-ipfs:v0.7.0
-        env:
-          IPFS_PROFILE: test
-        ports:
-          - 127.0.0.1:5013:5001
-    steps:
-      - name: setup
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.15
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: test
-        env:
-          SKIP_SERVICES: true
-          MONGO_URI: mongodb://127.0.0.1:27019
-          IPFS_API_ADDR: /ip4/127.0.0.1/tcp/5013
-        run: go test -v -timeout 60m -race ./buckets/...
-  archives:
-    name: Archives
-    runs-on: [self-hosted, hub3]
-    steps:
-      - name: setup
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.15
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: test
-        run: go test -v -timeout 60m -race ./integrationtest/...
-  mail:
-    name: Mail
-    runs-on: [self-hosted, hub4]
-    services:
-      mongodb:
-        image: mongo:latest
-        ports:
-          - 127.0.0.1:27020:27017
-      ipfs:
-        image: ipfs/go-ipfs:v0.7.0
-        env:
-          IPFS_PROFILE: test
-        ports:
-          - 127.0.0.1:5014:5001
-    steps:
-      - name: setup
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.15
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: test
-        env:
-          SKIP_SERVICES: true
-          MONGO_URI: mongodb://127.0.0.1:27020
-          IPFS_API_ADDR: /ip4/127.0.0.1/tcp/5014
-        run: go test -v -timeout 60m -race ./mail/...
+          IPFS_API_ADDR: /ip4/127.0.0.1/tcp/5001
+        run: go test -v -timeout 30m -race ./...
