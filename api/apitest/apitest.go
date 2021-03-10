@@ -24,10 +24,16 @@ import (
 	"github.com/textileio/go-threads/core/did"
 	tdb "github.com/textileio/go-threads/db"
 	nc "github.com/textileio/go-threads/net/api/client"
+	tutil "github.com/textileio/go-threads/util"
 )
 
 func NewService(t *testing.T) (listenAddr string, host did.DID) {
-	err := common.SetAllLogLevels(logging.LevelDebug)
+	err := tutil.SetLogLevels(map[string]logging.LogLevel{
+		"buckets":      logging.LevelDebug,
+		"buckets-api":  logging.LevelDebug,
+		"buckets-ipns": logging.LevelDebug,
+		"buckets-dns":  logging.LevelDebug,
+	})
 	require.NoError(t, err)
 
 	threadsAddr := GetThreadsApiAddr()

@@ -13,22 +13,11 @@ import (
 	"github.com/textileio/go-buckets/api"
 	"github.com/textileio/go-buckets/api/pb"
 	"github.com/textileio/go-threads/core/did"
-	"github.com/textileio/go-threads/util"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 var log = logging.Logger("buckets-api")
-
-func SetAllLogLevels(level logging.LogLevel) error {
-	return util.SetLogLevels(map[string]logging.LogLevel{
-		"buckets":         level,
-		"buckets-api":     level,
-		"buckets-gateway": level,
-		"buckets-ipns":    level,
-		"buckets-dns":     level,
-	})
-}
 
 func GetClientRPCOpts(target string) (opts []grpc.DialOption) {
 	creds := did.RPCCredentials{}
