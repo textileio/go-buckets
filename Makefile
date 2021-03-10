@@ -53,7 +53,7 @@ build-buckd-release: $(GOX) $(GOVVV) $(GOMPLATE)
 	$(call gen_release_files,./cmd/buckd,buckd,"linux/amd64 linux/386 linux/arm darwin/amd64 windows/amd64")
 .PHONY: build-buckd-release
 
-build-releases: build-hub-release build-hubd-release build-buck-release build-buckd-release build-billingd-release
+build-releases: build-buck-release build-buckd-release
 .PHONY: build-releases
 
 buck-up:
@@ -66,7 +66,7 @@ buck-clean:
 	docker-compose -f cmd/buckd/docker-compose-dev.yml down -v --remove-orphans
 
 test:
-	go test -race -timeout 45m ./...
+	go test -race -timeout 30m ./...
 .PHONY: test
 
 clean-protos:
