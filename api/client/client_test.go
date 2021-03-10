@@ -1158,7 +1158,7 @@ func TestClient_PullPathAccessRoles(t *testing.T) {
 }
 
 func newClient(t *testing.T) *client.Client {
-	listenAddr := apitest.NewService(t)
+	listenAddr, _ := apitest.NewService(t)
 	c, err := client.NewClient(listenAddr, common.GetClientRPCOpts(listenAddr)...)
 	require.NoError(t, err)
 	t.Cleanup(func() {

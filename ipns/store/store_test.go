@@ -15,7 +15,7 @@ func TestStore_Create(t *testing.T) {
 	defer ds.Close()
 	store := NewStore(ds)
 
-	err := store.Create("foo", "cid", thread.NewIDV1(thread.Raw, 32))
+	err := store.Create("foo", "cid", thread.NewRandomIDV1())
 	require.NoError(t, err)
 }
 
@@ -24,7 +24,7 @@ func TestStore_Get(t *testing.T) {
 	defer ds.Close()
 	store := NewStore(ds)
 
-	threadID := thread.NewIDV1(thread.Raw, 32)
+	threadID := thread.NewRandomIDV1()
 	err := store.Create("foo", "cid", threadID)
 	require.NoError(t, err)
 
@@ -40,7 +40,7 @@ func TestStore_GetByCid(t *testing.T) {
 	defer ds.Close()
 	store := NewStore(ds)
 
-	threadID := thread.NewIDV1(thread.Raw, 32)
+	threadID := thread.NewRandomIDV1()
 	err := store.Create("foo", "cid", threadID)
 	require.NoError(t, err)
 
@@ -56,7 +56,7 @@ func TestStore_Delete(t *testing.T) {
 	defer ds.Close()
 	store := NewStore(ds)
 
-	err := store.Create("foo", "cid", thread.NewIDV1(thread.Raw, 32))
+	err := store.Create("foo", "cid", thread.NewRandomIDV1())
 	require.NoError(t, err)
 
 	err = store.Delete("foo")
