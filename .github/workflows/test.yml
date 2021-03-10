@@ -10,7 +10,7 @@ jobs:
   test:
     name: Test
     runs-on: [self-hosted, buckets1]
-    container: ubuntu-latest
+    container: golang:1.16.0-buster
     services:
       threads:
         image: textile/go-threads:534a6d0
@@ -33,4 +33,4 @@ jobs:
           SKIP_SERVICES: true
           THREADS_API_ADDR: threads:5000
           IPFS_API_MULTIADDR: /dns4/ipfs/tcp/5001
-        run: make test
+        run: sleep 30 && make test
