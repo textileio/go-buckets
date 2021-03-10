@@ -36,6 +36,6 @@ jobs:
       - name: test
         env:
           SKIP_SERVICES: true
-          THREADS_API_ADDR: 127.0.0.1:4000
+          THREADS_API_ADDR: threads:4000
           IPFS_API_MULTIADDR: /ip4/127.0.0.1/tcp/5001
         run: go test -v -timeout 30m -race ./...
