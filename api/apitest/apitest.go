@@ -12,6 +12,7 @@ import (
 	"time"
 
 	httpapi "github.com/ipfs/go-ipfs-http-client"
+	logging "github.com/ipfs/go-log/v2"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,9 @@ import (
 )
 
 func NewService(t *testing.T) (listenAddr string, host did.DID) {
+	err := common.SetAllLogLevels(logging.LevelDebug)
+	require.NoError(t, err)
+
 	threadsAddr := GetThreadsApiAddr()
 	net, err := nc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
 	require.NoError(t, err)
@@ -36,7 +40,7 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 
 	db, err := dbc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
 	require.NoError(t, err)
-	ipfs, err := httpapi.NewApi(GetIPFSApiAddr())
+	ipfs, err := httpapi.NewApi(GetIPFSApiMultiAddr())
 	require.NoError(t, err)
 	ipnsm, err := ipns.NewManager(tdb.NewTxMapDatastore(), ipfs)
 	require.NoError(t, err)
@@ -66,20 +70,20 @@ func GetThreadsApiAddr() string {
 	if env != "" {
 		return env
 	}
-	return "127.0.0.1:4000"
+	return "127.0.0.1:4002"
 }
 
-// GetIPFSApiAddr returns env value or default.
-func GetIPFSApiAddr() ma.Multiaddr {
-	env := os.Getenv("IPFS_API_ADDR")
+// GetIPFSApiMultiAddr returns env value or default.
+func GetIPFSApiMultiAddr() ma.Multiaddr {
+	env := os.Getenv("IPFS_API_MULTIADDR")
 	if env != "" {
 		return util.MustParseAddr(env)
 	}
-	return util.MustParseAddr("/ip4/127.0.0.1/tcp/5001")
+	return util.MustParseAddr("/ip4/127.0.0.1/tcp/5012")
 }
 
-// StartIPFS start an ipfs node.
-func StartIPFS() (cleanup func()) {
+// StartServices starts an ipfs and threads node for tests.
+func StartServices() (cleanup func()) {
 	_, currentFilePath, _, _ := runtime.Caller(0)
 	dirpath := path.Dir(currentFilePath)
 
@@ -124,7 +128,7 @@ func StartIPFS() (cleanup func()) {
 		log.Fatalf("running docker-compose: %s", err)
 	}
 
-	limit := 5
+	limit := 20
 	retries := 0
 	var err error
 	for retries < limit {
@@ -148,7 +152,19 @@ func StartIPFS() (cleanup func()) {
 func checkServices() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
-	ic, err := httpapi.NewApi(GetIPFSApiAddr())
+
+	// Check Threads
+	threadsAddr := GetThreadsApiAddr()
+	tc, err := nc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
+	if err != nil {
+		return err
+	}
+	if _, err := tc.GetServices(ctx); err != nil {
+		return err
+	}
+
+	// Check IPFS
+	ic, err := httpapi.NewApi(GetIPFSApiMultiAddr())
 	if err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ import (
 func TestMain(m *testing.M) {
 	cleanup := func() {}
 	if os.Getenv("SKIP_SERVICES") != "true" {
-		//cleanup = apitest.StartIPFS()
+		cleanup = apitest.StartServices()
 	}
 	exitVal := m.Run()
 	cleanup()
@@ -98,7 +98,7 @@ func createWithCid(t *testing.T, ctx context.Context, c *client.Client, private 
 	require.NoError(t, err)
 	defer file2.Close()
 
-	ipfs, err := httpapi.NewApi(apitest.GetIPFSApiAddr())
+	ipfs, err := httpapi.NewApi(apitest.GetIPFSApiMultiAddr())
 	require.NoError(t, err)
 	p, err := ipfs.Unixfs().Add(
 		ctx,
@@ -295,7 +295,7 @@ func TestClient_ListIpfsPath(t *testing.T) {
 	require.NoError(t, err)
 	defer file2.Close()
 
-	ipfs, err := httpapi.NewApi(apitest.GetIPFSApiAddr())
+	ipfs, err := httpapi.NewApi(apitest.GetIPFSApiMultiAddr())
 	require.NoError(t, err)
 	p, err := ipfs.Unixfs().Add(
 		ctx,
@@ -497,7 +497,7 @@ func TestClient_PullIpfsPath(t *testing.T) {
 	require.NoError(t, err)
 	defer file2.Close()
 
-	ipfs, err := httpapi.NewApi(apitest.GetIPFSApiAddr())
+	ipfs, err := httpapi.NewApi(apitest.GetIPFSApiMultiAddr())
 	require.NoError(t, err)
 	p, err := ipfs.Unixfs().Add(
 		ctx,
@@ -597,7 +597,7 @@ func setPath(t *testing.T, private bool) {
 			require.NoError(t, err)
 			defer file2.Close()
 
-			ipfs, err := httpapi.NewApi(apitest.GetIPFSApiAddr())
+			ipfs, err := httpapi.NewApi(apitest.GetIPFSApiMultiAddr())
 			require.NoError(t, err)
 			p, err := ipfs.Unixfs().Add(
 				ctx,

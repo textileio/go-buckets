@@ -249,13 +249,10 @@ var rootCmd = &cobra.Command{
 
 		if config.Viper.GetBool("log.debug") {
 			err := util.SetLogLevels(map[string]logging.LogLevel{
-				daemonName:        logging.LevelDebug,
-				"buckets":         logging.LevelDebug,
-				"buckets-api":     logging.LevelDebug,
-				"buckets-gateway": logging.LevelDebug,
-				"buckets-ipns":    logging.LevelDebug,
-				"buckets-dns":     logging.LevelDebug,
+				daemonName: logging.LevelDebug,
 			})
+			cmd.ErrCheck(err)
+			err = common.SetAllLogLevels(logging.LevelDebug)
 			cmd.ErrCheck(err)
 		}
 	},
