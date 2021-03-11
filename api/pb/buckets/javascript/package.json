@@ -9,10 +9,10 @@
   "author": "Textile",
   "license": "MIT",
   "files": [
-    "api/pb/buckets_pb.js",
-    "api/pb/buckets_pb_service.js",
-    "api/pb/buckets_pb.d.ts",
-    "api/pb/buckets_pb_service.d.ts"
+    "api/pb/buckets/buckets_pb.js",
+    "api/pb/buckets/buckets_pb_service.js",
+    "api/pb/buckets/buckets_pb.d.ts",
+    "api/pb/buckets/buckets_pb_service.d.ts"
   ],
   "dependencies": {
     "@improbable-eng/grpc-web": "^0.14.0",

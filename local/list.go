@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ipfs/go-cid"
-	pb "github.com/textileio/go-buckets/api/pb"
+	pb "github.com/textileio/go-buckets/api/pb/buckets"
 )
 
 var errEmptyItem = fmt.Errorf("item is empty")

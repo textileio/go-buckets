@@ -11,7 +11,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api"
-	"github.com/textileio/go-buckets/api/pb"
+	pb "github.com/textileio/go-buckets/api/pb/buckets"
 	"github.com/textileio/go-threads/core/did"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

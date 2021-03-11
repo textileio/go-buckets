@@ -10,7 +10,7 @@ import (
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api/cast"
-	pb "github.com/textileio/go-buckets/api/pb"
+	pb "github.com/textileio/go-buckets/api/pb/buckets"
 	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"

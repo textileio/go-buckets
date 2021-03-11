@@ -1,6 +1,6 @@
 syntax = "proto3";
-package api.pb;
-option go_package = "github.com/textileio/go-buckets/api/pb";
+package api.pb.buckets;
+option go_package = "github.com/textileio/go-buckets/api/pb/buckets";
 
 message Metadata {
      string key = 1;
