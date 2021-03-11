@@ -2,12 +2,14 @@ package local
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/ipfs/go-cid"
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/spf13/cobra"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api/cast"
@@ -136,6 +138,13 @@ func (b *Buckets) NewBucket(ctx context.Context, conf Config, opts ...NewOption)
 		bc.Viper.Set("thread", conf.Thread.String())
 	}
 	bc.Viper.Set("key", conf.Key)
+	if conf.Identity == nil {
+		sk, _, err := crypto.GenerateEd25519Key(rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		conf.Identity = thread.NewLibp2pIdentity(sk)
+	}
 	bc.Viper.Set("identity", conf.Identity.String())
 
 	buck = &Bucket{

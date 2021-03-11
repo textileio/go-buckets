@@ -16,8 +16,8 @@ services:
       - BUCK_GATEWAY_URL
       - BUCK_GATEWAY_SUBDOMAINS
       - BUCK_GATEWAY_WWW_DOMAIN
-      - BUCK_THREADS_ADDR=threads:4000
-      - BUCK_IPFS_MULTIADDR=/dns4/ipfs/tcp/5011
+      - BUCK_THREADS_ADDR=threads:5000
+      - BUCK_IPFS_MULTIADDR=/dns4/ipfs/tcp/5001
       - BUCK_IPNS_REPUBLISH_SCHEDULE
       - BUCK_IPNS_REPUBLISH_CONCURRENCY
       - BUCK_CLOUDFLARE_DNS_ZONE_ID
@@ -40,7 +40,6 @@ services:
     ports:
       - "4066:4006"
       - "4066:4006/udp"
-      - "4000:5000"
       - "4050:5050"
   ipfs:
     image: ipfs/go-ipfs:v0.8.0
@@ -50,5 +49,4 @@ services:
     ports:
       - "4011:4001"
       - "4011:4001/udp"
-      - "127.0.0.1:5011:5001"
       - "8081:8080"

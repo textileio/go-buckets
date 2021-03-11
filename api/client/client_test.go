@@ -178,8 +178,6 @@ func TestClient_List(t *testing.T) {
 	assert.Len(t, rep.Buckets, 1)
 	assert.Equal(t, res.Bucket.Key, rep.Buckets[0].Key)
 	assert.Equal(t, res.Bucket.Path, rep.Buckets[0].Path)
-	assert.Equal(t, res.Bucket.CreatedAt, rep.Buckets[0].CreatedAt)
-	assert.Equal(t, res.Bucket.UpdatedAt, rep.Buckets[0].UpdatedAt)
 }
 
 func TestClient_Remove(t *testing.T) {
