@@ -39,6 +39,7 @@ services:
     volumes:
       - "${REPO_PATH}/threads:/data/threads"
     environment:
+      - THREADS_DEBUG=true
       - THREADS_APIADDR=/ip4/0.0.0.0/tcp/5000
       - THREADS_APIPROXYADDR=/ip4/0.0.0.0/tcp/5050
     ports:

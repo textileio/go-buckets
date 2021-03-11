@@ -129,7 +129,6 @@ Use the '--hard' flag to discard all local changes.
 		}
 
 		if !conf.Thread.Defined() {
-			cmd.Fatal(errors.New("oops"))
 			//ctx, cancel := context.WithTimeout(bucks.Context(context.Background()), cmd.Timeout)
 			//defer cancel()
 			//selected := bucks.Clients().SelectThread(

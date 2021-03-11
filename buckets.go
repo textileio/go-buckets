@@ -456,6 +456,7 @@ func (b *Buckets) PushPaths(
 		lk.Release()
 		return in, out, errs
 	}
+	readOnlyInstance := instance.Copy()
 
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -483,15 +484,15 @@ func (b *Buckets) PushPaths(
 				ctxLock.RUnlock()
 				fa, err := queue.add(ctx, b.ipfs.Unixfs(), pth, func() ([]byte, error) {
 					wg.Add(1)
-					instance.UpdatedAt = time.Now().UnixNano()
-					instance.SetMetadataAtPath(pth, collection.Metadata{
-						UpdatedAt: instance.UpdatedAt,
+					readOnlyInstance.UpdatedAt = time.Now().UnixNano()
+					readOnlyInstance.SetMetadataAtPath(pth, collection.Metadata{
+						UpdatedAt: readOnlyInstance.UpdatedAt,
 					})
-					instance.UnsetMetadataWithPrefix(pth + "/")
-					if err := b.c.Verify(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+					readOnlyInstance.UnsetMetadataWithPrefix(pth + "/")
+					if err := b.c.Verify(ctx, thread, readOnlyInstance, collection.WithIdentity(identity)); err != nil {
 						return nil, fmt.Errorf("verifying bucket update: %v", err)
 					}
-					key, err := instance.GetFileEncryptionKeyForPath(pth)
+					key, err := readOnlyInstance.GetFileEncryptionKeyForPath(pth)
 					if err != nil {
 						return nil, fmt.Errorf("getting bucket key: %v", err)
 					}
@@ -529,6 +530,8 @@ func (b *Buckets) PushPaths(
 				return err
 			}
 			return serr
+		} else {
+			log.Debugf("saved bucket %s with path: %s", instance.Key, instance.Path)
 		}
 		return err
 	}
@@ -541,6 +544,7 @@ func (b *Buckets) PushPaths(
 				ctxLock.RLock()
 				ctx2 := ctx
 				ctxLock.RUnlock()
+
 				fn, err := b.ipfs.ResolveNode(ctx2, res.resolved)
 				if err != nil {
 					errs <- saveWithErr(fmt.Errorf("resolving added node: %v", err))
@@ -580,6 +584,10 @@ func (b *Buckets) PushPaths(
 				}
 				instance.Path = dir.String()
 				instance.UpdatedAt = time.Now().UnixNano()
+				instance.SetMetadataAtPath(res.path, collection.Metadata{
+					UpdatedAt: instance.UpdatedAt,
+				})
+				instance.UnsetMetadataWithPrefix(res.path + "/")
 
 				out <- PushPathsResult{
 					Path:   res.path,

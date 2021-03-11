@@ -33,4 +33,4 @@ jobs:
           SKIP_SERVICES: true
           THREADS_API_ADDR: threads:5000
           IPFS_API_MULTIADDR: /dns4/ipfs/tcp/5001
-        run: sleep 30 && make test
+        run: make test

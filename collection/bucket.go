@@ -284,6 +284,25 @@ func (b *Bucket) ensureNoNulls() {
 	}
 }
 
+// Copy returns a copy of the bucket.
+func (b *Bucket) Copy() *Bucket {
+	md := make(map[string]Metadata)
+	for k, v := range b.Metadata {
+		md[k] = v
+	}
+	return &Bucket{
+		Key:       b.Key,
+		Owner:     b.Owner,
+		Name:      b.Name,
+		Version:   b.Version,
+		LinkKey:   b.LinkKey,
+		Path:      b.Path,
+		Metadata:  md,
+		CreatedAt: b.CreatedAt,
+		UpdatedAt: b.UpdatedAt,
+	}
+}
+
 // BucketOptions defines options for interacting with buckets.
 type BucketOptions struct {
 	Name string
