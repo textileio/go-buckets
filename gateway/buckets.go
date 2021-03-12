@@ -6,13 +6,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"path"
+	gopath "path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ipfs/interface-go-ipfs-core/path"
 	assets "github.com/textileio/go-assets"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/collection"
@@ -21,6 +22,143 @@ import (
 	"github.com/textileio/go-threads/core/did"
 	"github.com/textileio/go-threads/core/thread"
 )
+
+const (
+	// chunkSize for add file requests.
+	chunkSize = 1024 * 32
+)
+
+type PostError struct {
+	Error string `json:"error"`
+}
+
+type chanErr struct {
+	code int
+	err  error
+}
+
+type PushPathsResult struct {
+	Path   string `json:"path"`
+	Cid    string `json:"cid"`
+	Size   int64  `json:"size"`
+	Pinned int64  `json:"pinned"`
+}
+
+type PushPathsResults struct {
+	Added  []PushPathsResult `json:"added"`
+	Pinned int64             `json:"pinned"`
+	Bucket *buckets.Bucket   `json:"bucket"`
+}
+
+func (g *Gateway) pushPaths(c *gin.Context) {
+	threadID, err := thread.Decode(c.Param("thread"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
+			Error: fmt.Sprintf("invalid thread ID: %v", err),
+		})
+		return
+	}
+	key := c.Param("key")
+	var root path.Resolved // @todo: get root from path
+
+	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
+	if len(auth) < 2 {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, PostError{
+			Error: fmt.Sprintf("authorization required"),
+		})
+		return
+	}
+	token := auth[1]
+	fmt.Println(token)
+
+	form, err := c.MultipartForm()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, PostError{
+			Error: fmt.Sprintf("parsing form: %v", err),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	in, out, errs := g.lib.PushPaths(ctx, threadID, key, root, did.Token(token))
+	if len(errs) != 0 {
+		err := <-errs
+		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
+			Error: fmt.Sprintf("starting push: %v", err),
+		})
+		return
+	}
+
+	errCh := make(chan chanErr)
+	go func() {
+		for _, grp := range form.File {
+			for _, file := range grp {
+				f, err := file.Open()
+				if err != nil {
+					errCh <- chanErr{
+						code: http.StatusInternalServerError,
+						err:  fmt.Errorf("opening file: %v", err),
+					}
+					return
+				}
+				buf := make([]byte, chunkSize)
+				for {
+					n, err := f.Read(buf)
+					ch := buckets.PushPathsChunk{
+						Path: file.Filename,
+					}
+					if n > 0 {
+						ch.Data = make([]byte, n)
+						copy(ch.Data, buf[:n])
+						in <- ch
+					} else if err == io.EOF {
+						in <- ch
+						f.Close()
+						break
+					} else if err != nil {
+						f.Close()
+						errCh <- chanErr{
+							code: http.StatusInternalServerError,
+							err:  fmt.Errorf("reading file: %v", err),
+						}
+						return
+					}
+				}
+			}
+		}
+		close(in)
+	}()
+
+	results := PushPathsResults{}
+	for {
+		select {
+		case res := <-out:
+			results.Added = append(results.Added, PushPathsResult{
+				Path:   res.Path,
+				Cid:    res.Cid.String(),
+				Size:   res.Size,
+				Pinned: res.Pinned,
+			})
+			results.Bucket = res.Bucket
+			results.Pinned += res.Pinned
+		case err := <-errs:
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
+					Error: err.Error(),
+				})
+			} else {
+				c.JSON(http.StatusCreated, results)
+			}
+			return
+		case err := <-errCh:
+			c.AbortWithStatusJSON(err.code, PostError{
+				Error: err.err.Error(),
+			})
+			return
+		}
+	}
+}
 
 type fileSystem struct {
 	*assets.FileSystem
@@ -49,7 +187,7 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 		} else {
 			name = r.Key
 		}
-		p := path.Join("thread", threadID.String(), collection.Name, r.Key)
+		p := gopath.Join("thread", threadID.String(), collection.Name, r.Key)
 		if token.Defined() {
 			p += "?token=" + string(token)
 		}
@@ -61,7 +199,7 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 		}
 	}
 	c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
-		"Title":   "Index of " + path.Join("/thread", threadID.String(), collection.Name),
+		"Title":   "Index of " + gopath.Join("/thread", threadID.String(), collection.Name),
 		"Root":    "/",
 		"Path":    "",
 		"Updated": "",
@@ -99,11 +237,11 @@ func (g *Gateway) renderBucketPath(
 		if g.subdomains {
 			base = collection.Name
 		} else {
-			base = path.Join("thread", threadID.String(), collection.Name)
+			base = gopath.Join("thread", threadID.String(), collection.Name)
 		}
 		var links []link
 		for _, item := range rep.Items {
-			pth := path.Join(base, strings.Replace(item.Path, buck.Path, buck.Key, 1))
+			pth := gopath.Join(base, strings.Replace(item.Path, buck.Path, buck.Key, 1))
 			if token.Defined() {
 				pth += "?token=" + string(token)
 			}
@@ -121,7 +259,7 @@ func (g *Gateway) renderBucketPath(
 			name = buck.Key
 		}
 		root := strings.Replace(rep.Path, buck.Path, name, 1)
-		back := path.Dir(path.Join(base, strings.Replace(rep.Path, buck.Path, buck.Key, 1)))
+		back := gopath.Dir(gopath.Join(base, strings.Replace(rep.Path, buck.Path, buck.Key, 1)))
 		if token.Defined() {
 			back += "?token=" + string(token)
 		}
@@ -177,7 +315,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 				c.Abort()
 			}
 		} else if target != "" {
-			content := path.Join(c.Request.URL.Path, target)
+			content := gopath.Join(c.Request.URL.Path, target)
 			ctype := mime.TypeByExtension(filepath.Ext(content))
 			c.Writer.WriteHeader(http.StatusOK)
 			c.Writer.Header().Set("Content-Type", ctype)
