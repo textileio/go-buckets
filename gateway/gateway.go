@@ -111,6 +111,8 @@ func (g *Gateway) Start() {
 	router.GET("/ipld/:root", g.subdomainOptionHandler, g.ipldHandler)
 	router.GET("/ipld/:root/*path", g.subdomainOptionHandler, g.ipldHandler)
 
+	router.POST("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.pushPaths)
+
 	router.NoRoute(g.subdomainHandler)
 
 	g.server = &http.Server{
