@@ -1,6 +1,8 @@
 package cast
 
 import (
+	"encoding/json"
+
 	"github.com/textileio/go-buckets"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
 	"github.com/textileio/go-buckets/collection"
@@ -57,18 +59,28 @@ func BucketFromPb(bucket *pb.Bucket) (buckets.Bucket, error) {
 }
 
 func MetadataToPb(md collection.Metadata) *pb.Metadata {
+	var info []byte
+	if md.Info != nil {
+		info, _ = json.Marshal(md.Info)
+	}
 	return &pb.Metadata{
 		Key:       md.Key,
 		Roles:     RolesToPb(md.Roles),
 		UpdatedAt: md.UpdatedAt,
+		Info:      info,
 	}
 }
 
 func MetadataFromPb(md *pb.Metadata) collection.Metadata {
+	var info map[string]interface{}
+	if md.Info != nil {
+		_ = json.Unmarshal(md.Info, &info)
+	}
 	return collection.Metadata{
 		Key:       md.Key,
 		Roles:     RolesFromPb(md.Roles),
 		UpdatedAt: md.UpdatedAt,
+		Info:      info,
 	}
 }
 

@@ -345,5 +345,5 @@ func (b *Buckets) RemoteBuckets(
 
 // authCtx returns an identity token context for authentication and authorization.
 func authCtx(ctx context.Context, c *client.Client, identity thread.Identity) (context.Context, error) {
-	return c.NewTokenContext(ctx, identity, time.Hour)
+	return c.NewTokenContext(ctx, identity, time.Hour*24)
 }

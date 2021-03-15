@@ -18,7 +18,7 @@ import (
 	"github.com/textileio/go-threads/core/thread"
 )
 
-var log = logging.Logger("buckets-ipns")
+var log = logging.Logger("buckets/ipns")
 
 const (
 	// nameLen is the length of the random IPNS key name.
@@ -35,10 +35,10 @@ type Manager struct {
 	keyAPI  iface.KeyAPI
 	nameAPI iface.NameAPI
 
-	sync.Mutex
 	keyLocks map[string]chan struct{}
 	ctxsLock sync.Mutex
 	ctxs     map[string]context.CancelFunc
+	sync.Mutex
 }
 
 // NewManager returns a new IPNS manager.

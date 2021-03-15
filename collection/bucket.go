@@ -101,9 +101,10 @@ func (r Role) String() string {
 
 // Metadata contains metadata about a bucket item (a file or folder).
 type Metadata struct {
-	Key       string           `json:"key,omitempty"`
-	Roles     map[did.DID]Role `json:"roles"`
-	UpdatedAt int64            `json:"updated_at"`
+	Key       string                 `json:"key,omitempty"`
+	Roles     map[did.DID]Role       `json:"roles"`
+	Info      map[string]interface{} `json:"info,omitempty"`
+	UpdatedAt int64                  `json:"updated_at"`
 }
 
 // NewDefaultMetadata returns the default metadata for a path.
@@ -254,11 +255,21 @@ func (b *Bucket) SetMetadataAtPath(pth string, md Metadata) {
 		if md.Roles != nil {
 			x.Roles = md.Roles
 		}
+		if x.Info == nil {
+			x.Info = md.Info
+		} else if md.Info != nil {
+			for k, v := range md.Info {
+				x.Info[k] = v
+			}
+		}
 		x.UpdatedAt = md.UpdatedAt
 		b.Metadata[pth] = x
 	} else {
 		if md.Roles == nil {
 			md.Roles = make(map[did.DID]Role)
+		}
+		if md.Info == nil {
+			md.Info = make(map[string]interface{})
 		}
 		b.Metadata[pth] = md
 	}

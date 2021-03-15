@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/textileio/go-buckets/pinning"
 
 	ds "github.com/ipfs/go-datastore"
 	badger "github.com/ipfs/go-ds-badger"
@@ -249,12 +252,14 @@ var rootCmd = &cobra.Command{
 
 		if config.Viper.GetBool("log.debug") {
 			err := util.SetLogLevels(map[string]logging.LogLevel{
-				daemonName:        logging.LevelDebug,
-				"buckets":         logging.LevelDebug,
-				"buckets-api":     logging.LevelDebug,
-				"buckets-gateway": logging.LevelDebug,
-				"buckets-ipns":    logging.LevelDebug,
-				"buckets-dns":     logging.LevelDebug,
+				daemonName:         logging.LevelDebug,
+				"buckets":          logging.LevelDebug,
+				"buckets/api":      logging.LevelDebug,
+				"buckets/ipns":     logging.LevelDebug,
+				"buckets/dns":      logging.LevelDebug,
+				"buckets/ps":       logging.LevelDebug,
+				"buckets/ps-queue": logging.LevelDebug,
+				"buckets/gateway":  logging.LevelDebug,
 			})
 			cmd.ErrCheck(err)
 		}
@@ -299,15 +304,19 @@ var rootCmd = &cobra.Command{
 		ipfs, err := httpapi.NewApi(ipfsApi)
 		cmd.ErrCheck(err)
 
-		var ipnsms ds.TxnDatastore
+		var ipnsms, pss ds.TxnDatastore
 		switch datastoreType {
 		case "badger":
-			ipnsms, err = newBadgerStore(datastoreBadgerRepo)
+			ipnsms, err = newBadgerStore(filepath.Join(datastoreBadgerRepo, "ipns"))
+			cmd.ErrCheck(err)
+			pss, err = newBadgerStore(filepath.Join(datastoreBadgerRepo, "pinq"))
 			cmd.ErrCheck(err)
 		case "mongo":
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			ipnsms, err = newMongoStore(ctx, datastoreMongoUri, datastoreMongoName, "ipns")
+			cmd.ErrCheck(err)
+			pss, err = newMongoStore(ctx, datastoreMongoUri, datastoreMongoName, "pinq")
 			cmd.ErrCheck(err)
 		default:
 			cmd.Fatal(errors.New("datastoreType must be 'badger' or 'mongo'"))
@@ -333,7 +342,8 @@ var rootCmd = &cobra.Command{
 		cmd.ErrCheck(err)
 
 		// Configure gateway
-		gateway, err := gateway.NewGateway(lib, ipfs, ipnsm, gateway.Config{
+		ps := pinning.NewService(lib, pss)
+		gateway, err := gateway.NewGateway(lib, ipfs, ipnsm, ps, gateway.Config{
 			Addr:       addrGateway,
 			URL:        gatewayUrl,
 			Domain:     gatewayWwwDomain,
@@ -375,7 +385,15 @@ var rootCmd = &cobra.Command{
 
 			err = ipnsm.Close()
 			cmd.LogErr(err)
+			err = ipnsms.Close()
+			cmd.LogErr(err)
 			log.Info("ipns manager was shutdown")
+
+			err = ps.Close()
+			cmd.LogErr(err)
+			err = pss.Close()
+			cmd.LogErr(err)
+			log.Info("pinning service was shutdown")
 
 			err = net.Close()
 			cmd.LogErr(err)

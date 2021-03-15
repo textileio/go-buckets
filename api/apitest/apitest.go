@@ -30,9 +30,9 @@ import (
 func NewService(t *testing.T) (listenAddr string, host did.DID) {
 	err := tutil.SetLogLevels(map[string]logging.LogLevel{
 		"buckets":      logging.LevelDebug,
-		"buckets-api":  logging.LevelDebug,
-		"buckets-ipns": logging.LevelDebug,
-		"buckets-dns":  logging.LevelDebug,
+		"buckets/api":  logging.LevelDebug,
+		"buckets/ipns": logging.LevelDebug,
+		"buckets/dns":  logging.LevelDebug,
 	})
 	require.NoError(t, err)
 
