@@ -20,12 +20,7 @@ import (
 	"github.com/textileio/go-buckets/ipns"
 	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
-	"github.com/textileio/go-threads/core/thread"
-)
-
-const (
-	// chunkSize for add file requests.
-	chunkSize = 1024 * 32
+	core "github.com/textileio/go-threads/core/thread"
 )
 
 type PostError struct {
@@ -45,31 +40,30 @@ type PushPathsResult struct {
 }
 
 type PushPathsResults struct {
-	Added  []PushPathsResult `json:"added"`
-	Pinned int64             `json:"pinned"`
-	Bucket *buckets.Bucket   `json:"bucket"`
+	Results []PushPathsResult `json:"added"`
+	Pinned  int64             `json:"pinned"`
+	Bucket  *buckets.Bucket   `json:"bucket"`
 }
 
 func (g *Gateway) pushPaths(c *gin.Context) {
-	threadID, err := thread.Decode(c.Param("thread"))
+	thread, err := getThread(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
 			Error: fmt.Sprintf("invalid thread ID: %v", err),
 		})
 		return
 	}
-	key := c.Param("key")
-	var root path.Resolved // @todo: get root from path
-
-	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
-	if len(auth) < 2 {
+	key := getKey(c)
+	identity, ok := getIdentity(c)
+	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, PostError{
 			Error: fmt.Sprintf("authorization required"),
 		})
 		return
 	}
-	token := auth[1]
-	fmt.Println(token)
+
+	// @todo: get root from path
+	var root path.Resolved
 
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -81,7 +75,7 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
-	in, out, errs := g.lib.PushPaths(ctx, threadID, key, root, did.Token(token))
+	in, out, errs := g.lib.PushPaths(ctx, thread, key, root, identity)
 	if len(errs) != 0 {
 		err := <-errs
 		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
@@ -102,29 +96,11 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 					}
 					return
 				}
-				buf := make([]byte, chunkSize)
-				for {
-					n, err := f.Read(buf)
-					ch := buckets.PushPathsChunk{
-						Path: file.Filename,
-					}
-					if n > 0 {
-						ch.Data = make([]byte, n)
-						copy(ch.Data, buf[:n])
-						in <- ch
-					} else if err == io.EOF {
-						in <- ch
-						f.Close()
-						break
-					} else if err != nil {
-						f.Close()
-						errCh <- chanErr{
-							code: http.StatusInternalServerError,
-							err:  fmt.Errorf("reading file: %v", err),
-						}
-						return
-					}
+				in <- buckets.PushPathsInput{
+					Path:   file.Filename,
+					Reader: f,
 				}
+				f.Close()
 			}
 		}
 		close(in)
@@ -134,7 +110,7 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 	for {
 		select {
 		case res := <-out:
-			results.Added = append(results.Added, PushPathsResult{
+			results.Results = append(results.Results, PushPathsResult{
 				Path:   res.Path,
 				Cid:    res.Cid.String(),
 				Size:   res.Size,
@@ -173,8 +149,8 @@ func (f *fileSystem) Exists(prefix, path string) bool {
 	return ok
 }
 
-func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thread.ID, token did.Token) {
-	rep, err := g.lib.List(ctx, threadID, token)
+func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, thread core.ID, token did.Token) {
+	rep, err := g.lib.List(ctx, thread, token)
 	if err != nil {
 		renderError(c, http.StatusBadRequest, err)
 		return
@@ -187,7 +163,7 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 		} else {
 			name = r.Key
 		}
-		p := gopath.Join("thread", threadID.String(), collection.Name, r.Key)
+		p := gopath.Join("thread", thread.String(), collection.Name, r.Key)
 		if token.Defined() {
 			p += "?token=" + string(token)
 		}
@@ -199,7 +175,7 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 		}
 	}
 	c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
-		"Title":   "Index of " + gopath.Join("/thread", threadID.String(), collection.Name),
+		"Title":   "Index of " + gopath.Join("/thread", thread.String(), collection.Name),
 		"Root":    "/",
 		"Path":    "",
 		"Updated": "",
@@ -211,18 +187,18 @@ func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, threadID thr
 func (g *Gateway) renderBucketPath(
 	c *gin.Context,
 	ctx context.Context,
-	threadID thread.ID,
+	thread core.ID,
 	id,
 	pth string,
 	token did.Token,
 ) {
-	rep, buck, err := g.lib.ListPath(ctx, threadID, id, pth, token)
+	rep, buck, err := g.lib.ListPath(ctx, thread, id, pth, token)
 	if err != nil {
 		render404(c)
 		return
 	}
 	if !rep.IsDir {
-		r, err := g.lib.PullPath(ctx, threadID, buck.Key, pth, token)
+		r, err := g.lib.PullPath(ctx, thread, buck.Key, pth, token)
 		if err != nil {
 			render404(c)
 			return
@@ -237,7 +213,7 @@ func (g *Gateway) renderBucketPath(
 		if g.subdomains {
 			base = collection.Name
 		} else {
-			base = gopath.Join("thread", threadID.String(), collection.Name)
+			base = gopath.Join("thread", thread.String(), collection.Name)
 		}
 		var links []link
 		for _, item := range rep.Items {
@@ -275,9 +251,9 @@ func (g *Gateway) renderBucketPath(
 }
 
 type serveBucketFS interface {
-	GetThread(key string) (thread.ID, error)
-	Exists(ctx context.Context, threadID thread.ID, bucket, pth string, token did.Token) (bool, string)
-	Write(ctx context.Context, threadID thread.ID, bucket, pth string, token did.Token, writer io.Writer) error
+	GetThread(key string) (core.ID, error)
+	Exists(ctx context.Context, thread core.ID, bucket, pth string, token did.Token) (bool, string)
+	Write(ctx context.Context, thread core.ID, bucket, pth string, token did.Token, writer io.Writer) error
 	ValidHost() string
 }
 
@@ -293,7 +269,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 		if err != nil {
 			return
 		}
-		threadID, err := fs.GetThread(key)
+		thread, err := fs.GetThread(key)
 		if err != nil {
 			return
 		}
@@ -301,7 +277,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 
 		ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 		defer cancel()
-		exists, target := fs.Exists(ctx, threadID, key, c.Request.URL.Path, token)
+		exists, target := fs.Exists(ctx, thread, key, c.Request.URL.Path, token)
 		if exists {
 			c.Writer.WriteHeader(http.StatusOK)
 			ctype := mime.TypeByExtension(filepath.Ext(c.Request.URL.Path))
@@ -309,7 +285,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 				ctype = "application/octet-stream"
 			}
 			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, threadID, key, c.Request.URL.Path, token, c.Writer); err != nil {
+			if err := fs.Write(ctx, thread, key, c.Request.URL.Path, token, c.Writer); err != nil {
 				renderError(c, http.StatusInternalServerError, err)
 			} else {
 				c.Abort()
@@ -319,7 +295,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 			ctype := mime.TypeByExtension(filepath.Ext(content))
 			c.Writer.WriteHeader(http.StatusOK)
 			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, threadID, key, content, token, c.Writer); err != nil {
+			if err := fs.Write(ctx, thread, key, content, token, c.Writer); err != nil {
 				renderError(c, http.StatusInternalServerError, err)
 			} else {
 				c.Abort()
@@ -328,7 +304,7 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 	}
 }
 
-func (f *bucketFS) GetThread(bkey string) (id thread.ID, err error) {
+func (f *bucketFS) GetThread(bkey string) (id core.ID, err error) {
 	key, err := f.ipns.Store().GetByCid(bkey)
 	if err != nil {
 		return
@@ -336,11 +312,11 @@ func (f *bucketFS) GetThread(bkey string) (id thread.ID, err error) {
 	return key.ThreadID, nil
 }
 
-func (f *bucketFS) Exists(ctx context.Context, threadID thread.ID, key, pth string, token did.Token) (ok bool, name string) {
+func (f *bucketFS) Exists(ctx context.Context, thread core.ID, key, pth string, token did.Token) (ok bool, name string) {
 	if key == "" || pth == "/" {
 		return
 	}
-	rep, _, err := f.lib.ListPath(ctx, threadID, key, pth, token)
+	rep, _, err := f.lib.ListPath(ctx, thread, key, pth, token)
 	if err != nil {
 		return
 	}
@@ -355,8 +331,8 @@ func (f *bucketFS) Exists(ctx context.Context, threadID thread.ID, key, pth stri
 	return true, ""
 }
 
-func (f *bucketFS) Write(ctx context.Context, threadID thread.ID, key, pth string, token did.Token, writer io.Writer) error {
-	r, err := f.lib.PullPath(ctx, threadID, key, pth, token)
+func (f *bucketFS) Write(ctx context.Context, thread core.ID, key, pth string, token did.Token, writer io.Writer) error {
+	r, err := f.lib.PullPath(ctx, thread, key, pth, token)
 	if err != nil {
 		return err
 	}

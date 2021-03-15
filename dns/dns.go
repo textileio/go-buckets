@@ -7,7 +7,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 )
 
-var log = logging.Logger("buckets-dns")
+var log = logging.Logger("buckets/dns")
 
 const IPFSGateway = "cloudflare-ipfs.com"
 

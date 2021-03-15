@@ -221,9 +221,9 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 			}
 			switch payload := req.Payload.(type) {
 			case *pb.PushPathsRequest_Chunk_:
-				in <- buckets.PushPathsChunk{
-					Path: payload.Chunk.Path,
-					Data: payload.Chunk.Data,
+				in <- buckets.PushPathsInput{
+					Path:  payload.Chunk.Path,
+					Chunk: payload.Chunk.Data,
 				}
 			default:
 				errCh <- fmt.Errorf("invalid request")

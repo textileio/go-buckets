@@ -23,10 +23,12 @@ import (
 	gincors "github.com/rs/cors/wrapper/gin"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-threads/core/thread"
+	"github.com/textileio/go-buckets/pinning"
+	"github.com/textileio/go-threads/core/did"
+	core "github.com/textileio/go-threads/core/thread"
 )
 
-var log = logging.Logger("buckets-gateway")
+var log = logging.Logger("buckets/gateway")
 
 const handlerTimeout = time.Minute
 
@@ -48,6 +50,7 @@ type Gateway struct {
 	lib    *buckets.Buckets
 	ipfs   iface.CoreAPI
 	ipns   *ipns.Manager
+	ps     *pinning.Service
 
 	addr       string
 	url        string
@@ -64,11 +67,18 @@ type Config struct {
 }
 
 // NewGateway returns a new gateway.
-func NewGateway(lib *buckets.Buckets, ipfs iface.CoreAPI, ipns *ipns.Manager, conf Config) (*Gateway, error) {
+func NewGateway(
+	lib *buckets.Buckets,
+	ipfs iface.CoreAPI,
+	ipns *ipns.Manager,
+	ps *pinning.Service,
+	conf Config,
+) (*Gateway, error) {
 	return &Gateway{
 		lib:        lib,
 		ipfs:       ipfs,
 		ipns:       ipns,
+		ps:         ps,
 		addr:       conf.Addr,
 		url:        conf.URL,
 		domain:     conf.Domain,
@@ -112,6 +122,12 @@ func (g *Gateway) Start() {
 	router.GET("/ipld/:root/*path", g.subdomainOptionHandler, g.ipldHandler)
 
 	router.POST("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.pushPaths)
+
+	//router.GET("/thread/:thread/buckets/:key/pins", g.subdomainOptionHandler, g.listPins)
+	router.POST("/thread/:thread/buckets/:key/pins", g.subdomainOptionHandler, g.addPin)
+	//router.GET("/thread/:thread/buckets/:key/pins/:requestid", g.subdomainOptionHandler, g.getPin)
+	//router.POST("/thread/:thread/buckets/:key/pins/:requestid", g.subdomainOptionHandler, g.replacePin)
+	//router.DELETE("/thread/:thread/buckets/:key/pins/:requestid", g.subdomainOptionHandler, g.removePin)
 
 	router.NoRoute(g.subdomainHandler)
 
@@ -172,7 +188,8 @@ func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
 		return
 	}
 
-	// See security note https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L105
+	// See security note:
+	// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L105
 	c.Request.Header.Set("Clear-Site-Data", "\"cookies\", \"storage\"")
 
 	c.Redirect(http.StatusPermanentRedirect, loc)
@@ -235,7 +252,7 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 	case "ipld":
 		g.renderIPLDPath(c, key+c.Request.URL.Path)
 	case "thread":
-		threadID, err := thread.Decode(key)
+		thread, err := core.Decode(key)
 		if err != nil {
 			renderError(c, http.StatusBadRequest, fmt.Errorf("invalid thread ID"))
 			return
@@ -247,14 +264,14 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 			render404(c)
 		case 2:
 			if parts[1] != "" {
-				g.renderCollection(c, threadID, parts[1])
+				g.renderCollection(c, thread, parts[1])
 			} else {
 				render404(c)
 			}
 		case 3:
-			g.renderInstance(c, threadID, parts[1], parts[2], "")
+			g.renderInstance(c, thread, parts[1], parts[2], "")
 		case 4:
-			g.renderInstance(c, threadID, parts[1], parts[2], parts[3])
+			g.renderInstance(c, thread, parts[1], parts[2], parts[3])
 		default:
 			render404(c)
 		}
@@ -263,7 +280,8 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 	}
 }
 
-// Modified from https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L251
+// Modified from:
+// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L251
 func isSubdomainNamespace(ns string) bool {
 	switch ns {
 	case "ipfs", "ipns", "p2p", "ipld", "thread":
@@ -273,7 +291,8 @@ func isSubdomainNamespace(ns string) bool {
 	}
 }
 
-// Copied from https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L260
+// Copied from:
+// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L260
 func isPeerIDNamespace(ns string) bool {
 	switch ns {
 	case "ipns", "p2p":
@@ -284,7 +303,8 @@ func isPeerIDNamespace(ns string) bool {
 }
 
 // Converts a hostname/path to a subdomain-based URL, if applicable.
-// Modified from https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L270
+// Modified from:
+// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L270
 func (g *Gateway) toSubdomainURL(r *http.Request) (redirURL string, ok bool) {
 	var ns, rootID, rest string
 
@@ -358,4 +378,27 @@ func (g *Gateway) toSubdomainURL(r *http.Request) (redirURL string, ok bool) {
 	scheme := urlparts[0]
 	host := urlparts[1]
 	return safeRedirectURL(fmt.Sprintf("%s://%s.%s.%s/%s%s", scheme, rootID, ns, host, rest, query))
+}
+
+// getThread returns core.ID from request params.
+func getThread(c *gin.Context) (core.ID, error) {
+	id, err := core.Decode(c.Param("thread"))
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// getKey returns bucket key string (instance ID) from request params.
+func getKey(c *gin.Context) string {
+	return c.Param("key")
+}
+
+// getIdentity returns did.Token from request params.
+func getIdentity(c *gin.Context) (did.Token, bool) {
+	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
+	if len(auth) < 2 {
+		return "", false
+	}
+	return did.Token(auth[1]), true
 }

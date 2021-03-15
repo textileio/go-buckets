@@ -21,9 +21,15 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
-type PushPathsChunk struct {
+type PushPathsInput struct {
+	// Path is a bucket relative path at which to insert data.
 	Path string
-	Data []byte
+	// Reader from which to write data into Path.
+	Reader io.Reader
+	// Chunk should be used to add chunked data when a plain io.Reader is not available.
+	Chunk []byte
+	// Meta is optional metadata the will be persisted under Path.
+	Meta map[string]interface{}
 }
 
 type PushPathsResult struct {
@@ -34,17 +40,47 @@ type PushPathsResult struct {
 	Bucket *Bucket
 }
 
+func (b *Buckets) PushPath(
+	ctx context.Context,
+	thread core.ID,
+	key string,
+	root path.Resolved,
+	input PushPathsInput,
+	identity did.Token,
+) (*PushPathsResult, error) {
+	in, out, errs := b.PushPaths(ctx, thread, key, root, identity)
+	if len(errs) != 0 {
+		err := <-errs
+		return nil, err
+	}
+
+	go func() {
+		in <- input
+		close(in)
+	}()
+
+	result := &PushPathsResult{}
+	for {
+		select {
+		case res := <-out:
+			result = &res
+		case err := <-errs:
+			return result, err
+		}
+	}
+}
+
 func (b *Buckets) PushPaths(
 	ctx context.Context,
 	thread core.ID,
 	key string,
 	root path.Resolved,
 	identity did.Token,
-) (chan<- PushPathsChunk, <-chan PushPathsResult, <-chan error) {
+) (chan<- PushPathsInput, <-chan PushPathsResult, <-chan error) {
 	lk := b.locks.Get(lock(key))
 	lk.Acquire()
 
-	in := make(chan PushPathsChunk)
+	in := make(chan PushPathsInput)
 	out := make(chan PushPathsResult)
 	errs := make(chan error, 1)
 
@@ -71,13 +107,13 @@ func (b *Buckets) PushPaths(
 		queue := newFileQueue()
 		for {
 			select {
-			case chunk, ok := <-in:
+			case input, ok := <-in:
 				if !ok {
 					wg.Wait() // Request ended normally, wait for pending jobs
 					close(doneCh)
 					return
 				}
-				pth, err := parsePath(chunk.Path)
+				pth, err := parsePath(input.Path)
 				if err != nil {
 					errCh <- fmt.Errorf("parsing path: %v", err)
 					return
@@ -85,11 +121,12 @@ func (b *Buckets) PushPaths(
 				ctxLock.RLock()
 				ctx := ctx
 				ctxLock.RUnlock()
-				fa, err := queue.add(ctx, b.ipfs.Unixfs(), pth, func() ([]byte, error) {
+				fa, err := queue.add(ctx, b.ipfs.Unixfs(), pth, input.Meta, func() ([]byte, error) {
 					wg.Add(1)
 					readOnlyInstance.UpdatedAt = time.Now().UnixNano()
 					readOnlyInstance.SetMetadataAtPath(pth, collection.Metadata{
 						UpdatedAt: readOnlyInstance.UpdatedAt,
+						Info:      input.Meta,
 					})
 					readOnlyInstance.UnsetMetadataWithPrefix(pth + "/")
 					if err := b.c.Verify(ctx, thread, readOnlyInstance, collection.WithIdentity(identity)); err != nil {
@@ -106,8 +143,17 @@ func (b *Buckets) PushPaths(
 					return
 				}
 
-				if len(chunk.Data) > 0 {
-					if _, err := fa.writer.Write(chunk.Data); err != nil {
+				if input.Reader != nil {
+					if _, err := io.Copy(fa.writer, input.Reader); err != nil {
+						errCh <- fmt.Errorf("piping reader: %v", err)
+						return
+					}
+					if err := fa.writer.Close(); err != nil {
+						errCh <- fmt.Errorf("closing writer: %v", err)
+						return
+					}
+				} else if len(input.Chunk) > 0 {
+					if _, err := fa.writer.Write(input.Chunk); err != nil {
 						errCh <- fmt.Errorf("writing chunk: %v", err)
 						return
 					}
@@ -189,6 +235,7 @@ func (b *Buckets) PushPaths(
 				instance.UpdatedAt = time.Now().UnixNano()
 				instance.SetMetadataAtPath(res.path, collection.Metadata{
 					UpdatedAt: instance.UpdatedAt,
+					Info:      res.meta,
 				})
 				instance.UnsetMetadataWithPrefix(res.path + "/")
 
@@ -230,6 +277,7 @@ type addedFile struct {
 	path     string
 	resolved path.Resolved
 	size     int64
+	meta     map[string]interface{}
 }
 
 type fileQueue struct {
@@ -245,6 +293,7 @@ func (q *fileQueue) add(
 	ctx context.Context,
 	ufs iface.UnixfsAPI,
 	pth string,
+	meta map[string]interface{},
 	addFunc func() ([]byte, error),
 	doneCh chan<- addedFile,
 	errCh chan<- error,
@@ -314,7 +363,12 @@ func (q *fileQueue) add(
 			errCh <- fmt.Errorf("getting file size: %v", err)
 			return
 		}
-		doneCh <- addedFile{path: pth, resolved: res, size: int64(added)}
+		doneCh <- addedFile{
+			path:     pth,
+			resolved: res,
+			size:     int64(added),
+			meta:     meta,
+		}
 	}()
 
 	return fa, nil
