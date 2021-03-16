@@ -1,11 +1,9 @@
 package gateway
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/textileio/go-buckets/pinning/openapi"
@@ -42,9 +40,7 @@ func (g *Gateway) addPin(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	status, err := g.ps.AddPin(ctx, thread, key, pin, identity)
+	status, err := g.ps.AddPin(thread, key, pin, identity)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return

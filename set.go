@@ -17,6 +17,7 @@ func (b *Buckets) SetPath(
 	thread core.ID,
 	key, pth string,
 	cid c.Cid,
+	meta map[string]interface{},
 	identity did.Token,
 ) (int64, *Bucket, error) {
 	lck := b.locks.Get(lock(key))
@@ -32,6 +33,7 @@ func (b *Buckets) SetPath(
 	instance.UpdatedAt = time.Now().UnixNano()
 	instance.SetMetadataAtPath(pth, collection.Metadata{
 		UpdatedAt: instance.UpdatedAt,
+		Info:      meta,
 	})
 	instance.UnsetMetadataWithPrefix(pth + "/")
 

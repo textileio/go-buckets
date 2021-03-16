@@ -15,7 +15,6 @@ import (
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
 )
 
 // MakeBucketSeed returns a raw ipld node containing a random seed.
@@ -203,7 +202,7 @@ func GetNodeAtPath(
 	key []byte,
 ) (ipld.Node, error) {
 	if key != nil {
-		rp, fp, err := util.ParsePath(pth)
+		rp, fp, err := ParsePath(pth)
 		if err != nil {
 			return nil, err
 		}
@@ -300,7 +299,7 @@ func InsertNodeAtPath(
 	key []byte,
 ) (context.Context, path.Resolved, error) {
 	// The first step here is find a resolvable list of nodes that point to path.
-	rp, fp, err := util.ParsePath(pth)
+	rp, fp, err := ParsePath(pth)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -408,7 +407,7 @@ func RemoveNodeAtPath(
 	key []byte,
 ) (context.Context, path.Resolved, error) {
 	// The first step here is find a resolvable list of nodes that point to path.
-	rp, fp, err := util.ParsePath(pth)
+	rp, fp, err := ParsePath(pth)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -481,4 +480,34 @@ func GetPathSize(ctx context.Context, ipfs iface.CoreAPI, root path.Path) (int64
 		return 0, fmt.Errorf("getting dag size: %v", err)
 	}
 	return int64(stat.CumulativeSize), nil
+}
+
+// NewResolvedPath returns path.Resolved from a string.
+func NewResolvedPath(s string) (path.Resolved, error) {
+	parts := strings.SplitN(s, "/", 3)
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("path is not resolvable")
+	}
+	c, err := cid.Decode(parts[2])
+	if err != nil {
+		return nil, err
+	}
+	return path.IpfsPath(c), nil
+}
+
+// ParsePath returns path.Resolved and a path remainder from path.Path.
+func ParsePath(p path.Path) (resolved path.Resolved, fpath string, err error) {
+	parts := strings.SplitN(p.String(), "/", 4)
+	if len(parts) < 3 {
+		err = fmt.Errorf("path does not contain a resolvable segment")
+		return
+	}
+	c, err := cid.Decode(parts[2])
+	if err != nil {
+		return
+	}
+	if len(parts) > 3 {
+		fpath = parts[3]
+	}
+	return path.IpfsPath(c), fpath, nil
 }

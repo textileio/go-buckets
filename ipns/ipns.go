@@ -14,15 +14,13 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	mbase "github.com/multiformats/go-multibase"
 	s "github.com/textileio/go-buckets/ipns/store"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/thread"
+	tutil "github.com/textileio/go-threads/util"
 )
 
 var log = logging.Logger("buckets/ipns")
 
 const (
-	// nameLen is the length of the random IPNS key name.
-	nameLen = 16
 	// publishTimeout
 	publishTimeout = time.Minute * 2
 	// maxCancelPublishTries is the number of time cancelling a publish is allowed to fail.
@@ -59,7 +57,7 @@ func (m *Manager) Store() *s.Store {
 
 // CreateKey generates and saves a new IPNS key.
 func (m *Manager) CreateKey(ctx context.Context, dbID thread.ID) (keyID string, err error) {
-	key, err := m.keyAPI.Generate(ctx, util.MakeToken(nameLen), options.Key.Type(options.RSAKey))
+	key, err := m.keyAPI.Generate(ctx, tutil.MakeToken(), options.Key.Type(options.RSAKey))
 	if err != nil {
 		return
 	}

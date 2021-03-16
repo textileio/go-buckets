@@ -16,7 +16,6 @@ import (
 	"github.com/textileio/dcrypto"
 	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-buckets/dag"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
@@ -168,7 +167,7 @@ func (b *Buckets) PushPaths(
 	}()
 
 	var changed bool
-	sctx := util.NewClonedContext(ctx)
+	sctx := newClonedContext(ctx)
 	saveWithErr := func(err error) error {
 		cancel()
 		if !changed {
@@ -373,3 +372,14 @@ func (q *fileQueue) add(
 
 	return fa, nil
 }
+
+// newClonedContext returns a context with the same Values but not inherited cancelation.
+func newClonedContext(ctx context.Context) context.Context {
+	return valueOnlyContext{Context: ctx}
+}
+
+type valueOnlyContext struct{ context.Context }
+
+func (valueOnlyContext) Deadline() (deadline time.Time, ok bool) { return }
+func (valueOnlyContext) Done() <-chan struct{}                   { return nil }
+func (valueOnlyContext) Err() error                              { return nil }

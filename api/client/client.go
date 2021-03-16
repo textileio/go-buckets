@@ -19,7 +19,7 @@ import (
 	"github.com/textileio/go-buckets/api/cast"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 	"google.golang.org/grpc"
@@ -440,7 +440,7 @@ func (c *Client) PushPaths(
 				q.outCh <- PushPathsResult{err: err}
 				return
 			}
-			root, err := util.NewResolvedPath(rep.Bucket.Path)
+			root, err := dag.NewResolvedPath(rep.Bucket.Path)
 			if err != nil {
 				q.outCh <- PushPathsResult{err: err}
 				return
@@ -457,10 +457,11 @@ func (c *Client) PushPaths(
 
 	sendChunk := func(c *pb.PushPathsRequest_Chunk) bool {
 		q.lk.Lock()
-		defer q.lk.Unlock()
 		if q.closed {
+			q.lk.Unlock()
 			return false
 		}
+		q.lk.Unlock()
 
 		if err := stream.Send(&pb.PushPathsRequest{
 			Payload: &pb.PushPathsRequest_Chunk_{
@@ -473,9 +474,12 @@ func (c *Client) PushPaths(
 			return false
 		}
 		atomic.AddInt64(&q.complete, int64(len(c.Data)))
-		if args.Progress != nil {
-			args.Progress <- q.complete
+
+		q.lk.Lock()
+		if !q.closed && args.Progress != nil {
+			args.Progress <- atomic.LoadInt64(&q.complete)
 		}
+		q.lk.Unlock()
 		return true
 	}
 
@@ -639,7 +643,7 @@ func (c *Client) RemovePath(
 	if err != nil {
 		return nil, err
 	}
-	return util.NewResolvedPath(res.Bucket.Path)
+	return dag.NewResolvedPath(res.Bucket.Path)
 }
 
 // PushPathAccessRoles updates path access roles by merging the pushed roles with existing roles.

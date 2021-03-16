@@ -25,7 +25,7 @@ import (
 	"github.com/textileio/go-buckets/api/client"
 	"github.com/textileio/go-buckets/api/common"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/did"
 	"github.com/textileio/go-threads/core/thread"
 )
@@ -385,7 +385,7 @@ func pushPaths(t *testing.T, ctx context.Context, c *client.Client, private bool
 	assert.Len(t, rep3.Item.Items, 3)
 
 	// Concurrent writes should result in one being rejected due to the fast-forward-only rule
-	root, err := util.NewResolvedPath(rep3.Bucket.Path)
+	root, err := dag.NewResolvedPath(rep3.Bucket.Path)
 	require.NoError(t, err)
 	var err1, err2 error
 	var wg sync.WaitGroup

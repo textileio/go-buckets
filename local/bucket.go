@@ -17,7 +17,7 @@ import (
 	"github.com/textileio/go-buckets/api/client"
 	"github.com/textileio/go-buckets/cmd"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/thread"
 )
 
@@ -312,7 +312,7 @@ func (b *Bucket) getRemoteRoot(ctx context.Context) (cid.Cid, error) {
 	if err != nil {
 		return cid.Undef, err
 	}
-	rp, err := util.NewResolvedPath(rr.Bucket.Path)
+	rp, err := dag.NewResolvedPath(rr.Bucket.Path)
 	if err != nil {
 		return cid.Undef, err
 	}

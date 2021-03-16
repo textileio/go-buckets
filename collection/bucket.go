@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/textileio/go-buckets/collection/mergemap"
+
 	"github.com/alecthomas/jsonschema"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/dcrypto"
@@ -258,9 +260,7 @@ func (b *Bucket) SetMetadataAtPath(pth string, md Metadata) {
 		if x.Info == nil {
 			x.Info = md.Info
 		} else if md.Info != nil {
-			for k, v := range md.Info {
-				x.Info[k] = v
-			}
+			mergemap.Merge(x.Info, md.Info)
 		}
 		x.UpdatedAt = md.UpdatedAt
 		b.Metadata[pth] = x

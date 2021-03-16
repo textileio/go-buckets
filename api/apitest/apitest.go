@@ -19,7 +19,6 @@ import (
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api/common"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-buckets/util"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
 	tdb "github.com/textileio/go-threads/db"
@@ -83,9 +82,9 @@ func GetThreadsApiAddr() string {
 func GetIPFSApiMultiAddr() ma.Multiaddr {
 	env := os.Getenv("IPFS_API_MULTIADDR")
 	if env != "" {
-		return util.MustParseAddr(env)
+		return tutil.MustParseAddr(env)
 	}
-	return util.MustParseAddr("/ip4/127.0.0.1/tcp/5012")
+	return tutil.MustParseAddr("/ip4/127.0.0.1/tcp/5012")
 }
 
 // StartServices starts an ipfs and threads node for tests.

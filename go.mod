@@ -55,6 +55,7 @@ require (
 	github.com/multiformats/go-multibase v0.0.3
 	github.com/multiformats/go-multihash v0.0.14
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
+	github.com/oklog/ulid/v2 v2.0.2
 	github.com/olekukonko/tablewriter v0.0.4
 	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/pelletier/go-toml v1.7.0 // indirect
@@ -72,7 +73,7 @@ require (
 	github.com/textileio/dcrypto v0.0.1
 	github.com/textileio/go-assets v0.0.0-20200430191519-b341e634e2b7
 	github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5
-	github.com/textileio/go-threads v1.0.3-0.20210310071259-b3c756e6c9c2
+	github.com/textileio/go-threads v1.0.3-0.20210316214137-091b67e69bc7
 	github.com/warpfork/go-wish v0.0.0-20200122115046-b9ea61034e4a // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210118024343-169e9d70c0c2 // indirect
 	github.com/xdg/stringprep v1.0.0 // indirect

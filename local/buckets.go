@@ -16,7 +16,7 @@ import (
 	"github.com/textileio/go-buckets/api/client"
 	"github.com/textileio/go-buckets/cmd"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/thread"
 )
 
@@ -200,7 +200,7 @@ func (b *Buckets) NewBucket(ctx context.Context, conf Config, opts ...NewOption)
 		if err = buck.repo.SetRemotePath(collection.SeedName, sc); err != nil {
 			return nil, err
 		}
-		rp, err := util.NewResolvedPath(rep.Bucket.Path)
+		rp, err := dag.NewResolvedPath(rep.Bucket.Path)
 		if err != nil {
 			return nil, err
 		}
