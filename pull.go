@@ -9,7 +9,6 @@ import (
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/dcrypto"
 	"github.com/textileio/go-buckets/dag"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
@@ -51,7 +50,7 @@ func (b *Buckets) PullPath(
 
 	var filePath path.Resolved
 	if instance.IsPrivate() {
-		buckPath, err := util.NewResolvedPath(instance.Path)
+		buckPath, err := dag.NewResolvedPath(instance.Path)
 		if err != nil {
 			return nil, err
 		}

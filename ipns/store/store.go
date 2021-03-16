@@ -30,12 +30,6 @@ func NewStore(store ds.TxnDatastore) *Store {
 }
 
 func (s *Store) Create(name, cid string, threadID thread.ID) error {
-	txn, err := s.store.NewTransaction(false)
-	if err != nil {
-		return err
-	}
-	defer txn.Discard()
-
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(Key{
 		Name:      name,
@@ -45,6 +39,12 @@ func (s *Store) Create(name, cid string, threadID thread.ID) error {
 	}); err != nil {
 		return err
 	}
+
+	txn, err := s.store.NewTransaction(false)
+	if err != nil {
+		return err
+	}
+	defer txn.Discard()
 
 	// Add key value
 	if err := txn.Put(dsPrefix.ChildString(name), buf.Bytes()); err != nil {
@@ -64,9 +64,12 @@ func (s *Store) Get(name string) (*Key, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decode(val)
+}
 
+func decode(v []byte) (*Key, error) {
 	var buf bytes.Buffer
-	buf.Write(val)
+	buf.Write(v)
 	dec := gob.NewDecoder(&buf)
 	var key Key
 	if err := dec.Decode(&key); err != nil {
@@ -96,7 +99,11 @@ func (s *Store) Delete(name string) error {
 	}
 	defer txn.Discard()
 
-	key, err := s.Get(name)
+	val, err := txn.Get(dsPrefix.ChildString(name))
+	if err != nil {
+		return err
+	}
+	key, err := decode(val)
 	if err != nil {
 		return err
 	}

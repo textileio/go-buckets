@@ -11,7 +11,7 @@ import (
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api/cast"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
@@ -195,7 +195,7 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 		}
 		key = payload.Header.Key
 		if len(payload.Header.Root) != 0 {
-			root, err = util.NewResolvedPath(payload.Header.Root)
+			root, err = dag.NewResolvedPath(payload.Header.Root)
 			if err != nil {
 				return fmt.Errorf("resolving root path: %v", err)
 			}
@@ -210,10 +210,10 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 	}
 	errCh := make(chan error)
 	go func() {
+		defer close(in)
 		for {
 			req, err := server.Recv()
 			if err == io.EOF {
-				close(in)
 				return
 			} else if err != nil {
 				errCh <- fmt.Errorf("on receive: %v", err)
@@ -317,7 +317,7 @@ func (s *Service) SetPath(ctx context.Context, req *pb.SetPathRequest) (*pb.SetP
 		return nil, fmt.Errorf("decoding cid: %v", err)
 	}
 
-	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, req.Path, cid, identity)
+	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, req.Path, cid, nil, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +351,7 @@ func (s *Service) RemovePath(ctx context.Context, req *pb.RemovePathRequest) (re
 	}
 	var root path.Resolved
 	if len(req.Root) != 0 {
-		root, err = util.NewResolvedPath(req.Root)
+		root, err = dag.NewResolvedPath(req.Root)
 		if err != nil {
 			return nil, fmt.Errorf("resolving root path: %v", err)
 		}

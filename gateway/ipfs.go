@@ -14,7 +14,6 @@ import (
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/textileio/go-buckets/util"
 )
 
 func (g *Gateway) ipfsHandler(c *gin.Context) {
@@ -58,7 +57,7 @@ func (g *Gateway) renderIPFSPath(c *gin.Context, base, pth string) {
 				links = append(links, link{
 					Name: l.Name,
 					Path: gopath.Join(dir, l.Name),
-					Size: util.ByteCountDecimal(int64(l.Size)),
+					Size: byteCountDecimal(int64(l.Size)),
 				})
 			}
 			var index string

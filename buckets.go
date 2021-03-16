@@ -20,7 +20,6 @@ import (
 	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-buckets/dns"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-buckets/util"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
@@ -197,14 +196,14 @@ func (b *Buckets) GetLinksForBucket(
 		}
 		links.IPNS += pth
 	}
-	if bucket.IsPrivate() {
-		query := "?token=" + string(identity)
-		links.URL += query
-		if len(links.WWW) != 0 {
-			links.WWW += query
-		}
-		links.IPNS += query
+
+	query := "?token=" + string(identity)
+	links.URL += query
+	if len(links.WWW) != 0 {
+		links.WWW += query
 	}
+	links.IPNS += query
+
 	return links, nil
 }
 
@@ -237,7 +236,7 @@ func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identi
 		return 0, fmt.Errorf("deleting bucket: %v", err)
 	}
 
-	buckPath, err := util.NewResolvedPath(instance.Path)
+	buckPath, err := dag.NewResolvedPath(instance.Path)
 	if err != nil {
 		return 0, fmt.Errorf("resolving path: %v", err)
 	}

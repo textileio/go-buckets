@@ -6,17 +6,22 @@ import (
 	"strings"
 	"time"
 
+	c "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/pinning/openapi"
 	q "github.com/textileio/go-buckets/pinning/queue"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
 
-var log = logging.Logger("buckets/ps")
+var (
+	log = logging.Logger("buckets/ps")
+
+	statusTimeout = time.Minute
+	pinTimeout    = time.Hour
+)
 
 type Service struct {
 	lib   *buckets.Buckets
@@ -24,10 +29,9 @@ type Service struct {
 }
 
 func NewService(lib *buckets.Buckets, store ds.TxnDatastore) *Service {
-	return &Service{
-		lib:   lib,
-		queue: q.NewQueue(store),
-	}
+	s := &Service{lib: lib}
+	s.queue = q.NewQueue(store, s.handleRequest, s.failRequest)
+	return s
 }
 
 func (s *Service) Close() error {
@@ -35,19 +39,21 @@ func (s *Service) Close() error {
 }
 
 func (s *Service) AddPin(
-	ctx context.Context,
 	thread core.ID,
 	key string,
 	pin openapi.Pin,
 	identity did.Token,
 ) (*openapi.PinStatus, error) {
 	status := &openapi.PinStatus{
-		Requestid: util.MakeToken(20),
+		Requestid: s.queue.NewID(),
 		Created:   time.Now(),
 		Status:    openapi.QUEUED,
 		Pin:       pin,
 	}
 
+	// Push a placeholder with status "queued"
+	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	defer cancel()
 	if _, err := s.lib.PushPath(
 		ctx,
 		thread,
@@ -62,15 +68,91 @@ func (s *Service) AddPin(
 		},
 		identity,
 	); err != nil {
-		return nil, fmt.Errorf("pushing pin status to bucket: %v", err)
+		return nil, fmt.Errorf("pushing status to bucket: %v", err)
 	}
 
 	if err := s.queue.AddRequest(thread, key, status, identity); err != nil {
-		return nil, fmt.Errorf("enqueueing pin request: %v", err)
+		return nil, fmt.Errorf("adding request: %v", err)
 	}
 
-	log.Debugf("added pin request: %s", status.Requestid)
+	log.Debugf("added request: %s", status.Requestid)
 	return status, nil
+}
+
+func (s *Service) handleRequest(ctx context.Context, r *q.Request) error {
+	log.Debugf("processing request: %s", r.ID)
+
+	cid, err := c.Decode(r.Cid)
+	if err != nil {
+		return fmt.Errorf("decoding cid: %v", err)
+	}
+
+	// Update placeholder with status "pinning"
+	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
+	defer cancel()
+	if _, err := s.lib.PushPath(
+		ctx,
+		r.Thread,
+		r.Key,
+		nil,
+		buckets.PushPathsInput{
+			Path:   r.ID,
+			Reader: strings.NewReader(string(openapi.PINNING)),
+			Meta: map[string]interface{}{
+				"pin": map[string]interface{}{"status": openapi.PINNING},
+			},
+		},
+		r.Identity,
+	); err != nil {
+		return fmt.Errorf("pushing status to bucket: %v", err)
+	}
+
+	// Replace placeholder with requested Cid and set status to "pinned"
+	pctx, pcancel := context.WithTimeout(ctx, pinTimeout)
+	defer pcancel()
+	if _, _, err := s.lib.SetPath(
+		pctx,
+		r.Thread,
+		r.Key,
+		r.ID,
+		cid,
+		map[string]interface{}{
+			"pin": map[string]interface{}{"status": openapi.PINNED},
+		},
+		r.Identity,
+	); err != nil {
+		return fmt.Errorf("setting path %s: %v", r.ID, err)
+	}
+
+	log.Debugf("request completed: %s", r.ID)
+	return nil
+}
+
+func (s *Service) failRequest(ctx context.Context, r *q.Request) error {
+	log.Debugf("failing request: %s", r.ID)
+
+	// Update placeholder with status "failed"
+	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
+	defer cancel()
+	if _, err := s.lib.PushPath(
+		ctx,
+		r.Thread,
+		r.Key,
+		nil,
+		buckets.PushPathsInput{
+			Path:   r.ID,
+			Reader: strings.NewReader(string(openapi.FAILED)),
+			Meta: map[string]interface{}{
+				"pin": map[string]interface{}{"status": openapi.FAILED},
+			},
+		},
+		r.Identity,
+	); err != nil {
+		return fmt.Errorf("pushing status to bucket: %v", err)
+	}
+
+	log.Debugf("request failed: %s", r.ID)
+	return nil
 }
 
 //// GetPinsQuery represents Pin query parameters.

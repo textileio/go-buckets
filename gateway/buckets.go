@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	gopath "path"
 	"path/filepath"
@@ -18,10 +19,13 @@ import (
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
+
+var UploadTimeout = time.Hour
+
+const chunkSize = 1024 * 32
 
 type PostError struct {
 	Error string `json:"error"`
@@ -33,14 +37,13 @@ type chanErr struct {
 }
 
 type PushPathsResult struct {
-	Path   string `json:"path"`
-	Cid    string `json:"cid"`
-	Size   int64  `json:"size"`
-	Pinned int64  `json:"pinned"`
+	Path string `json:"path"`
+	Cid  string `json:"cid"`
+	Size int64  `json:"size"`
 }
 
 type PushPathsResults struct {
-	Results []PushPathsResult `json:"added"`
+	Results []PushPathsResult `json:"results"`
 	Pinned  int64             `json:"pinned"`
 	Bucket  *buckets.Bucket   `json:"bucket"`
 }
@@ -65,15 +68,22 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 	// @todo: get root from path
 	var root path.Resolved
 
-	form, err := c.MultipartForm()
+	_, params, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, PostError{
-			Error: fmt.Sprintf("parsing form: %v", err),
+		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
+			Error: fmt.Sprintf("parsing content-type: %v", err),
+		})
+		return
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
+			Error: "invalid multipart boundary",
 		})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), UploadTimeout)
 	defer cancel()
 	in, out, errs := g.lib.PushPaths(ctx, thread, key, root, identity)
 	if len(errs) != 0 {
@@ -86,24 +96,43 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 
 	errCh := make(chan chanErr)
 	go func() {
-		for _, grp := range form.File {
-			for _, file := range grp {
-				f, err := file.Open()
-				if err != nil {
+		defer close(in)
+		mr := multipart.NewReader(c.Request.Body, boundary)
+		buf := make([]byte, chunkSize)
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				return
+			} else if err != nil {
+				errCh <- chanErr{
+					code: http.StatusInternalServerError,
+					err:  fmt.Errorf("reading part: %v", err),
+				}
+				return
+			}
+			for {
+				n, err := part.Read(buf)
+				input := buckets.PushPathsInput{
+					Path: part.FileName(),
+				}
+				if n > 0 {
+					input.Chunk = make([]byte, n)
+					copy(input.Chunk, buf[:n])
+					in <- input
+				} else if err == io.EOF {
+					in <- input
+					part.Close()
+					break
+				} else if err != nil {
 					errCh <- chanErr{
 						code: http.StatusInternalServerError,
-						err:  fmt.Errorf("opening file: %v", err),
+						err:  fmt.Errorf("reading part: %v", err),
 					}
+					part.Close()
 					return
 				}
-				in <- buckets.PushPathsInput{
-					Path:   file.Filename,
-					Reader: f,
-				}
-				f.Close()
 			}
 		}
-		close(in)
 	}()
 
 	results := PushPathsResults{}
@@ -111,13 +140,12 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 		select {
 		case res := <-out:
 			results.Results = append(results.Results, PushPathsResult{
-				Path:   res.Path,
-				Cid:    res.Cid.String(),
-				Size:   res.Size,
-				Pinned: res.Pinned,
+				Path: res.Path,
+				Cid:  res.Cid.String(),
+				Size: res.Size,
 			})
 			results.Bucket = res.Bucket
-			results.Pinned += res.Pinned
+			results.Pinned = res.Pinned
 		case err := <-errs:
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
@@ -224,7 +252,7 @@ func (g *Gateway) renderBucketPath(
 			links = append(links, link{
 				Name:  item.Name,
 				Path:  pth,
-				Size:  util.ByteCountDecimal(item.Size),
+				Size:  byteCountDecimal(item.Size),
 				Links: strconv.Itoa(len(item.Items)),
 			})
 		}
