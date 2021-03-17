@@ -2,81 +2,66 @@ package gateway
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
-	"strings"
+	gopath "path"
 
 	"github.com/gin-gonic/gin"
-	col "github.com/textileio/go-buckets/collection"
+	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
-	"github.com/textileio/go-threads/db"
 )
 
-// collectionHandler handles collection requests.
-func (g *Gateway) collectionHandler(c *gin.Context) {
-	thread, err := core.Decode(c.Param("thread"))
+// threadHandler handles thread requests.
+func (g *Gateway) threadHandler(c *gin.Context) {
+	thread, err := core.Decode(c.Param("id"))
 	if err != nil {
-		renderError(c, http.StatusBadRequest, fmt.Errorf("invalid thread ID"))
+		renderError(c, http.StatusBadRequest, errors.New("invalid thread ID"))
 		return
 	}
-	g.renderCollection(c, thread, c.Param("collection"))
+	g.renderThread(c, thread)
 }
 
-// renderCollection renders all instances in a collection.
-func (g *Gateway) renderCollection(c *gin.Context, thread core.ID, collection string) {
-	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
-	defer cancel()
-	token := did.Token(c.Query("token"))
-
-	jsn := c.Query("json") == "true"
-	if collection == col.Name && !jsn {
-		g.renderBucket(c, ctx, thread, token)
-		return
-	} else {
-		var dummy interface{}
-		res, err := g.lib.DB().Find(ctx, thread, collection, &db.Query{}, &dummy, db.WithTxnToken(token))
-		if err != nil {
-			render404(c)
-			return
-		}
-		c.JSON(http.StatusOK, res)
-	}
-}
-
-// instanceHandler handles collection instance requests.
-func (g *Gateway) instanceHandler(c *gin.Context) {
-	thread, err := core.Decode(c.Param("thread"))
-	if err != nil {
-		renderError(c, http.StatusBadRequest, fmt.Errorf("invalid thread ID"))
-		return
-	}
-	g.renderInstance(c, thread, c.Param("collection"), c.Param("id"), c.Param("path"))
-}
-
-// renderInstance renders an instance in a collection.
-// If the collection is buckets, the built-in buckets UI in rendered instead.
-// This can be overridden with the query param json=true.
-func (g *Gateway) renderInstance(c *gin.Context, thread core.ID, collection, id, pth string) {
-	pth = strings.TrimPrefix(pth, "/")
-	jsn := c.Query("json") == "true"
-	if (collection != col.Name || jsn) && pth != "" {
-		render404(c)
-		return
-	}
+// renderThread renders all buckets in a thread.
+func (g *Gateway) renderThread(c *gin.Context, thread core.ID) {
 	token := did.Token(c.Query("token"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	if collection == col.Name && !jsn {
-		g.renderBucketPath(c, ctx, thread, id, pth, token)
+	g.renderThreadBuckets(c, ctx, thread, token)
+}
+
+func (g *Gateway) renderThreadBuckets(c *gin.Context, ctx context.Context, thread core.ID, token did.Token) {
+	rep, err := g.lib.List(ctx, thread, token)
+	if err != nil {
+		renderError(c, http.StatusBadRequest, err)
 		return
-	} else {
-		var res interface{}
-		if err := g.lib.DB().FindByID(ctx, thread, collection, id, &res, db.WithTxnToken(token)); err != nil {
-			render404(c)
-			return
-		}
-		c.JSON(http.StatusOK, res)
 	}
+	links := make([]link, len(rep))
+	for i, r := range rep {
+		var name string
+		if r.Name != "" {
+			name = r.Name
+		} else {
+			name = r.Key
+		}
+		p := gopath.Join(collection.Name, r.Key)
+		if token.Defined() {
+			p += "?token=" + string(token)
+		}
+		links[i] = link{
+			Name:  name,
+			Path:  p,
+			Size:  "",
+			Links: "",
+		}
+	}
+	c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
+		"Title":   "Index of " + gopath.Join("/thread", thread.String()),
+		"Root":    "/",
+		"Path":    "",
+		"Updated": "",
+		"Back":    "",
+		"Links":   links,
+	})
 }

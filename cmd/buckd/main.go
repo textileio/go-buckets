@@ -104,6 +104,10 @@ var (
 				Key:      "threads.addr",
 				DefValue: "127.0.0.1:4000",
 			},
+			"threadsGatewayUrl": {
+				Key:      "threads.gateway_url",
+				DefValue: "http://127.0.0.1:7000",
+			},
 
 			// IPFS
 			"ipfsMultiaddr": {
@@ -289,6 +293,8 @@ var rootCmd = &cobra.Command{
 		gatewayWwwDomain := config.Viper.GetString("gateway.www_domain")
 
 		threadsApi := config.Viper.GetString("threads.addr")
+		threadsGatewayUrl := config.Viper.GetString("threads.gateway_url")
+
 		ipfsApi := cmd.AddrFromStr(config.Viper.GetString("ipfs.multiaddr"))
 
 		//ipnsRepublishSchedule := config.Viper.GetString("ipns.republish_schedule")
@@ -336,6 +342,7 @@ var rootCmd = &cobra.Command{
 		cmd.ErrCheck(err)
 
 		buckets.GatewayURL = gatewayUrl
+		buckets.ThreadsGatewayURL = threadsGatewayUrl
 		buckets.WWWDomain = gatewayWwwDomain
 
 		server, proxy, err := common.GetServerAndProxy(lib, addrApi, addrApiProxy)
@@ -343,19 +350,19 @@ var rootCmd = &cobra.Command{
 
 		// Configure gateway
 		ps := pinning.NewService(lib, pss)
-		gateway, err := gateway.NewGateway(lib, ipfs, ipnsm, ps, gateway.Config{
+		gw, err := gateway.NewGateway(lib, ipfs, ipnsm, ps, gateway.Config{
 			Addr:       addrGateway,
 			URL:        gatewayUrl,
 			Domain:     gatewayWwwDomain,
 			Subdomains: gatewaySubdomains,
 		})
 		cmd.ErrCheck(err)
-		gateway.Start()
+		gw.Start()
 
 		fmt.Println("Welcome to Buckets!")
 
 		cmd.HandleInterrupt(func() {
-			err := gateway.Close()
+			err := gw.Close()
 			cmd.LogErr(err)
 			log.Info("gateway was shutdown")
 

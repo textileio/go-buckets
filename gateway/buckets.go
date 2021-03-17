@@ -2,214 +2,37 @@ package gateway
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"mime"
-	"mime/multipart"
 	"net/http"
 	gopath "path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/ipfs/interface-go-ipfs-core/path"
-	assets "github.com/textileio/go-assets"
-	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/ipns"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
 
-var UploadTimeout = time.Hour
-
-const chunkSize = 1024 * 32
-
-type PostError struct {
-	Error string `json:"error"`
+func (g *Gateway) bucketHandler(c *gin.Context) {
+	g.renderBucket(c, c.Param("key"), c.Param("path"))
 }
 
-type chanErr struct {
-	code int
-	err  error
-}
+// renderInstance renders a bucket instance in a collection.
+func (g *Gateway) renderBucket(c *gin.Context, id, pth string) {
+	pth = strings.TrimPrefix(pth, "/")
+	token := did.Token(c.Query("token"))
 
-type PushPathsResult struct {
-	Path string `json:"path"`
-	Cid  string `json:"cid"`
-	Size int64  `json:"size"`
-}
-
-type PushPathsResults struct {
-	Results []PushPathsResult `json:"results"`
-	Pinned  int64             `json:"pinned"`
-	Bucket  *buckets.Bucket   `json:"bucket"`
-}
-
-func (g *Gateway) pushPaths(c *gin.Context) {
-	thread, err := getThread(c)
+	ipnskey, err := g.ipns.Store().GetByCid(id)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
-			Error: fmt.Sprintf("invalid thread ID: %v", err),
-		})
-		return
-	}
-	key := getKey(c)
-	identity, ok := getIdentity(c)
-	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, PostError{
-			Error: fmt.Sprintf("authorization required"),
-		})
+		render404(c)
 		return
 	}
 
-	// @todo: get root from path
-	var root path.Resolved
-
-	_, params, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
-			Error: fmt.Sprintf("parsing content-type: %v", err),
-		})
-		return
-	}
-	boundary, ok := params["boundary"]
-	if !ok {
-		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
-			Error: "invalid multipart boundary",
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), UploadTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	in, out, errs := g.lib.PushPaths(ctx, thread, key, root, identity)
-	if len(errs) != 0 {
-		err := <-errs
-		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
-			Error: fmt.Sprintf("starting push: %v", err),
-		})
-		return
-	}
-
-	errCh := make(chan chanErr)
-	go func() {
-		defer close(in)
-		mr := multipart.NewReader(c.Request.Body, boundary)
-		buf := make([]byte, chunkSize)
-		for {
-			part, err := mr.NextPart()
-			if err == io.EOF {
-				return
-			} else if err != nil {
-				errCh <- chanErr{
-					code: http.StatusInternalServerError,
-					err:  fmt.Errorf("reading part: %v", err),
-				}
-				return
-			}
-			for {
-				n, err := part.Read(buf)
-				input := buckets.PushPathsInput{
-					Path: part.FileName(),
-				}
-				if n > 0 {
-					input.Chunk = make([]byte, n)
-					copy(input.Chunk, buf[:n])
-					in <- input
-				} else if err == io.EOF {
-					in <- input
-					part.Close()
-					break
-				} else if err != nil {
-					errCh <- chanErr{
-						code: http.StatusInternalServerError,
-						err:  fmt.Errorf("reading part: %v", err),
-					}
-					part.Close()
-					return
-				}
-			}
-		}
-	}()
-
-	results := PushPathsResults{}
-	for {
-		select {
-		case res := <-out:
-			results.Results = append(results.Results, PushPathsResult{
-				Path: res.Path,
-				Cid:  res.Cid.String(),
-				Size: res.Size,
-			})
-			results.Bucket = res.Bucket
-			results.Pinned = res.Pinned
-		case err := <-errs:
-			if err != nil {
-				c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
-					Error: err.Error(),
-				})
-			} else {
-				c.JSON(http.StatusCreated, results)
-			}
-			return
-		case err := <-errCh:
-			c.AbortWithStatusJSON(err.code, PostError{
-				Error: err.err.Error(),
-			})
-			return
-		}
-	}
-}
-
-type fileSystem struct {
-	*assets.FileSystem
-}
-
-func (f *fileSystem) Exists(prefix, path string) bool {
-	pth := strings.TrimPrefix(path, prefix)
-	if pth == "/" {
-		return false
-	}
-	_, ok := f.Files[pth]
-	return ok
-}
-
-func (g *Gateway) renderBucket(c *gin.Context, ctx context.Context, thread core.ID, token did.Token) {
-	rep, err := g.lib.List(ctx, thread, token)
-	if err != nil {
-		renderError(c, http.StatusBadRequest, err)
-		return
-	}
-	links := make([]link, len(rep))
-	for i, r := range rep {
-		var name string
-		if r.Name != "" {
-			name = r.Name
-		} else {
-			name = r.Key
-		}
-		p := gopath.Join("thread", thread.String(), collection.Name, r.Key)
-		if token.Defined() {
-			p += "?token=" + string(token)
-		}
-		links[i] = link{
-			Name:  name,
-			Path:  p,
-			Size:  "",
-			Links: "",
-		}
-	}
-	c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
-		"Title":   "Index of " + gopath.Join("/thread", thread.String(), collection.Name),
-		"Root":    "/",
-		"Path":    "",
-		"Updated": "",
-		"Back":    "",
-		"Links":   links,
-	})
+	g.renderBucketPath(c, ctx, ipnskey.ThreadID, id, pth, token)
 }
 
 func (g *Gateway) renderBucketPath(
@@ -238,10 +61,8 @@ func (g *Gateway) renderBucketPath(
 		}
 	} else {
 		var base string
-		if g.subdomains {
+		if !g.subdomains {
 			base = collection.Name
-		} else {
-			base = gopath.Join("thread", thread.String(), collection.Name)
 		}
 		var links []link
 		for _, item := range rep.Items {
@@ -276,145 +97,4 @@ func (g *Gateway) renderBucketPath(
 			"Links":   links,
 		})
 	}
-}
-
-type serveBucketFS interface {
-	GetThread(key string) (core.ID, error)
-	Exists(ctx context.Context, thread core.ID, bucket, pth string, token did.Token) (bool, string)
-	Write(ctx context.Context, thread core.ID, bucket, pth string, token did.Token, writer io.Writer) error
-	ValidHost() string
-}
-
-type bucketFS struct {
-	lib    *buckets.Buckets
-	ipns   *ipns.Manager
-	domain string
-}
-
-func serveBucket(fs serveBucketFS) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		key, err := bucketFromHost(c.Request.Host, fs.ValidHost())
-		if err != nil {
-			return
-		}
-		thread, err := fs.GetThread(key)
-		if err != nil {
-			return
-		}
-		token := did.Token(c.Query("token"))
-
-		ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
-		defer cancel()
-		exists, target := fs.Exists(ctx, thread, key, c.Request.URL.Path, token)
-		if exists {
-			c.Writer.WriteHeader(http.StatusOK)
-			ctype := mime.TypeByExtension(filepath.Ext(c.Request.URL.Path))
-			if ctype == "" {
-				ctype = "application/octet-stream"
-			}
-			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, thread, key, c.Request.URL.Path, token, c.Writer); err != nil {
-				renderError(c, http.StatusInternalServerError, err)
-			} else {
-				c.Abort()
-			}
-		} else if target != "" {
-			content := gopath.Join(c.Request.URL.Path, target)
-			ctype := mime.TypeByExtension(filepath.Ext(content))
-			c.Writer.WriteHeader(http.StatusOK)
-			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, thread, key, content, token, c.Writer); err != nil {
-				renderError(c, http.StatusInternalServerError, err)
-			} else {
-				c.Abort()
-			}
-		}
-	}
-}
-
-func (f *bucketFS) GetThread(bkey string) (id core.ID, err error) {
-	key, err := f.ipns.Store().GetByCid(bkey)
-	if err != nil {
-		return
-	}
-	return key.ThreadID, nil
-}
-
-func (f *bucketFS) Exists(ctx context.Context, thread core.ID, key, pth string, token did.Token) (ok bool, name string) {
-	if key == "" || pth == "/" {
-		return
-	}
-	rep, _, err := f.lib.ListPath(ctx, thread, key, pth, token)
-	if err != nil {
-		return
-	}
-	if rep.IsDir {
-		for _, item := range rep.Items {
-			if item.Name == "index.html" {
-				return false, item.Name
-			}
-		}
-		return
-	}
-	return true, ""
-}
-
-func (f *bucketFS) Write(ctx context.Context, thread core.ID, key, pth string, token did.Token, writer io.Writer) error {
-	r, err := f.lib.PullPath(ctx, thread, key, pth, token)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	_, err = io.Copy(writer, r)
-	return err
-}
-
-func (f *bucketFS) ValidHost() string {
-	return f.domain
-}
-
-// renderWWWBucket renders a bucket as a website.
-func (g *Gateway) renderWWWBucket(c *gin.Context, key string) {
-	ipnskey, err := g.ipns.Store().GetByCid(key)
-	if err != nil {
-		render404(c)
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
-	defer cancel()
-	token := did.Token(c.Query("token"))
-	rep, _, err := g.lib.ListPath(ctx, ipnskey.ThreadID, key, "", token)
-	if err != nil {
-		render404(c)
-		return
-	}
-	for _, item := range rep.Items {
-		if item.Name == "index.html" {
-			c.Writer.WriteHeader(http.StatusOK)
-			c.Writer.Header().Set("Content-Type", "text/html")
-			r, err := g.lib.PullPath(ctx, ipnskey.ThreadID, key, item.Name, token)
-			if err != nil {
-				render404(c)
-				return
-			}
-			if _, err := io.Copy(c.Writer, r); err != nil {
-				r.Close()
-				render404(c)
-				return
-			}
-			r.Close()
-		}
-	}
-	renderError(c, http.StatusNotFound, fmt.Errorf("an index.html file was not found in this bucket"))
-}
-
-func bucketFromHost(host, valid string) (key string, err error) {
-	parts := strings.SplitN(host, ".", 2)
-	hostport := parts[len(parts)-1]
-	hostparts := strings.SplitN(hostport, ":", 2)
-	if hostparts[0] != valid || valid == "" {
-		err = fmt.Errorf("invalid bucket host")
-		return
-	}
-	return parts[0], nil
 }
