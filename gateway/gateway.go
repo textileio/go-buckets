@@ -1,10 +1,12 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -157,12 +159,13 @@ func (g *Gateway) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := g.server.Shutdown(ctx); err != nil {
-		return err
+		return fmt.Errorf("shutting down server: %v", err)
 	}
 	return nil
 }
 
 // dashboardHandler renders a dev or org dashboard.
+// @todo: Use this
 func (g *Gateway) dashboardHandler(c *gin.Context) {
 	render404(c)
 }
@@ -350,6 +353,16 @@ func (g *Gateway) toSubdomainURL(r *http.Request) (redirURL string, ok bool) {
 	scheme := urlparts[0]
 	host := urlparts[1]
 	return safeRedirectURL(fmt.Sprintf("%s://%s.%s.%s/%s%s", scheme, rootID, ns, host, rest, query))
+}
+
+func detectReaderContentType(r io.Reader) (string, io.Reader, error) {
+	var buf [512]byte
+	n, err := io.ReadAtLeast(r, buf[:], len(buf))
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return "", nil, fmt.Errorf("reading reader: %s", err)
+	}
+	contentType := http.DetectContentType(buf[:])
+	return contentType, io.MultiReader(bytes.NewReader(buf[:n]), r), nil
 }
 
 // getThread returns core.ID from request params.

@@ -34,7 +34,7 @@ func (g *Gateway) renderThread(c *gin.Context, thread core.ID) {
 func (g *Gateway) renderThreadBuckets(c *gin.Context, ctx context.Context, thread core.ID, token did.Token) {
 	rep, err := g.lib.List(ctx, thread, token)
 	if err != nil {
-		renderError(c, http.StatusBadRequest, err)
+		render404(c)
 		return
 	}
 	links := make([]link, len(rep))
