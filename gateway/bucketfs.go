@@ -3,14 +3,13 @@ package gateway
 import (
 	"context"
 	"errors"
-	"io"
-	"mime"
+	"fmt"
 	"net/http"
 	gopath "path"
-	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/render"
 	"github.com/textileio/go-assets"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/ipns"
@@ -34,7 +33,7 @@ func (f *fileSystem) Exists(prefix, path string) bool {
 type serveBucketFS interface {
 	GetThread(key string) (core.ID, error)
 	Exists(ctx context.Context, thread core.ID, bucket, pth string, token did.Token) (bool, string)
-	Write(ctx context.Context, thread core.ID, bucket, pth string, token did.Token, writer io.Writer) error
+	Write(c *gin.Context, ctx context.Context, thread core.ID, bucket, pth string, token did.Token) error
 	ValidHost() string
 }
 
@@ -56,27 +55,17 @@ func serveBucket(fs serveBucketFS) gin.HandlerFunc {
 		}
 		token := did.Token(c.Query("token"))
 
+		var content string
 		ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 		defer cancel()
 		exists, target := fs.Exists(ctx, thread, key, c.Request.URL.Path, token)
 		if exists {
-			c.Writer.WriteHeader(http.StatusOK)
-			ctype := mime.TypeByExtension(filepath.Ext(c.Request.URL.Path))
-			if ctype == "" {
-				ctype = "application/octet-stream"
-			}
-			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, thread, key, c.Request.URL.Path, token, c.Writer); err != nil {
-				renderError(c, http.StatusInternalServerError, err)
-			} else {
-				c.Abort()
-			}
-		} else if target != "" {
-			content := gopath.Join(c.Request.URL.Path, target)
-			ctype := mime.TypeByExtension(filepath.Ext(content))
-			c.Writer.WriteHeader(http.StatusOK)
-			c.Writer.Header().Set("Content-Type", ctype)
-			if err := fs.Write(ctx, thread, key, content, token, c.Writer); err != nil {
+			content = c.Request.URL.Path
+		} else if len(target) != 0 {
+			content = gopath.Join(c.Request.URL.Path, target)
+		}
+		if len(content) != 0 {
+			if err := fs.Write(c, ctx, thread, key, content, token); err != nil {
 				renderError(c, http.StatusInternalServerError, err)
 			} else {
 				c.Abort()
@@ -112,14 +101,20 @@ func (f *bucketFS) Exists(ctx context.Context, thread core.ID, key, pth string, 
 	return true, ""
 }
 
-func (f *bucketFS) Write(ctx context.Context, thread core.ID, key, pth string, token did.Token, writer io.Writer) error {
+func (f *bucketFS) Write(c *gin.Context, ctx context.Context, thread core.ID, key, pth string, token did.Token) error {
 	r, err := f.lib.PullPath(ctx, thread, key, pth, token)
 	if err != nil {
-		return err
+		return fmt.Errorf("pulling path: %v", err)
 	}
 	defer r.Close()
-	_, err = io.Copy(writer, r)
-	return err
+
+	ct, mr, err := detectReaderContentType(r)
+	if err != nil {
+		return fmt.Errorf("detecting content-type: %v", err)
+	}
+	c.Writer.Header().Set("Content-Type", ct)
+	c.Render(200, render.Reader{ContentLength: -1, Reader: mr})
+	return nil
 }
 
 func (f *bucketFS) ValidHost() string {
@@ -143,18 +138,19 @@ func (g *Gateway) renderWWWBucket(c *gin.Context, key string) {
 	}
 	for _, item := range rep.Items {
 		if item.Name == "index.html" {
-			c.Writer.WriteHeader(http.StatusOK)
-			c.Writer.Header().Set("Content-Type", "text/html")
 			r, err := g.lib.PullPath(ctx, ipnskey.ThreadID, key, item.Name, token)
 			if err != nil {
 				render404(c)
 				return
 			}
-			if _, err := io.Copy(c.Writer, r); err != nil {
-				r.Close()
-				render404(c)
+
+			ct, mr, err := detectReaderContentType(r)
+			if err != nil {
+				renderError(c, http.StatusInternalServerError, fmt.Errorf("detecting content-type: %v", err))
 				return
 			}
+			c.Writer.Header().Set("Content-Type", ct)
+			c.Render(200, render.Reader{ContentLength: -1, Reader: mr})
 			r.Close()
 		}
 	}

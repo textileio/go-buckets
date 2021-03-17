@@ -2,8 +2,6 @@ module github.com/textileio/go-buckets
 
 go 1.16
 
-// replace github.com/textileio/go-threads => ../go-threads
-
 require (
 	github.com/alecthomas/jsonschema v0.0.0-20191017121752-4bb6e3fae4f2
 	github.com/aws/aws-sdk-go v1.32.11 // indirect

@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"net/http"
 	gopath "path"
 	"strconv"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/render"
 	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
@@ -55,10 +56,14 @@ func (g *Gateway) renderBucketPath(
 			return
 		}
 		defer r.Close()
-		if _, err := io.Copy(c.Writer, r); err != nil {
-			render404(c)
+
+		ct, mr, err := detectReaderContentType(r)
+		if err != nil {
+			renderError(c, http.StatusInternalServerError, fmt.Errorf("detecting content-type: %v", err))
 			return
 		}
+		c.Writer.Header().Set("Content-Type", ct)
+		c.Render(200, render.Reader{ContentLength: -1, Reader: mr})
 	} else {
 		var base string
 		if !g.subdomains {
@@ -78,7 +83,7 @@ func (g *Gateway) renderBucketPath(
 			})
 		}
 		var name string
-		if buck.Name != "" {
+		if len(buck.Name) != 0 {
 			name = buck.Name
 		} else {
 			name = buck.Key
