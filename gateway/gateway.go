@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -109,25 +110,28 @@ func (g *Gateway) Start() {
 		c.Writer.WriteHeader(http.StatusNoContent)
 	})
 
-	router.GET("/thread/:thread/:collection", g.subdomainOptionHandler, g.collectionHandler)
-	router.GET("/thread/:thread/:collection/:id", g.subdomainOptionHandler, g.instanceHandler)
-	router.GET("/thread/:thread/:collection/:id/*path", g.subdomainOptionHandler, g.instanceHandler)
-
 	router.GET("/ipfs/:root", g.subdomainOptionHandler, g.ipfsHandler)
 	router.GET("/ipfs/:root/*path", g.subdomainOptionHandler, g.ipfsHandler)
+
 	router.GET("/ipns/:key", g.subdomainOptionHandler, g.ipnsHandler)
 	router.GET("/ipns/:key/*path", g.subdomainOptionHandler, g.ipnsHandler)
+
 	router.GET("/p2p/:key", g.subdomainOptionHandler, g.p2pHandler)
+
 	router.GET("/ipld/:root", g.subdomainOptionHandler, g.ipldHandler)
 	router.GET("/ipld/:root/*path", g.subdomainOptionHandler, g.ipldHandler)
 
-	router.POST("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.pushPaths)
+	router.POST("/thread/:id", g.subdomainOptionHandler, g.threadHandler)
 
-	//router.GET("/thread/:thread/buckets/:key/pins", g.subdomainOptionHandler, g.listPins)
-	router.POST("/thread/:thread/buckets/:key/pins", g.subdomainOptionHandler, g.addPin)
-	//router.GET("/thread/:thread/buckets/:key/pins/:requestid", g.subdomainOptionHandler, g.getPin)
-	//router.POST("/thread/:thread/buckets/:key/pins/:requestid", g.subdomainOptionHandler, g.replacePin)
-	//router.DELETE("/thread/:thread/buckets/:key/pins/:requestid", g.subdomainOptionHandler, g.removePin)
+	router.POST("/buckets/:key", g.subdomainOptionHandler, g.pushPaths)
+	router.GET("/buckets/:key", g.subdomainOptionHandler, g.bucketHandler)
+	router.GET("/buckets/:key/*path", g.subdomainOptionHandler, g.bucketHandler)
+
+	router.GET("/pins/:key", g.subdomainOptionHandler, g.listPins)
+	router.POST("/pins/:key", g.subdomainOptionHandler, g.addPin)
+	router.GET("/pins/:key/:requestid", g.subdomainOptionHandler, g.getPin)
+	router.POST("/pins/:key/:requestid", g.subdomainOptionHandler, g.replacePin)
+	router.DELETE("/pins/:key/:requestid", g.subdomainOptionHandler, g.removePin)
 
 	router.NoRoute(g.subdomainHandler)
 
@@ -143,25 +147,6 @@ func (g *Gateway) Start() {
 	log.Infof("gateway listening at %s", g.server.Addr)
 }
 
-// loadTemplate loads HTML templates.
-func loadTemplate() (*template.Template, error) {
-	t := template.New("")
-	for name, file := range Assets.Files {
-		if file.IsDir() || !strings.HasSuffix(name, ".gohtml") {
-			continue
-		}
-		h, err := ioutil.ReadAll(file)
-		if err != nil {
-			return nil, err
-		}
-		t, err = t.New(name).Parse(string(h))
-		if err != nil {
-			return nil, err
-		}
-	}
-	return t, nil
-}
-
 // Addr returns the gateway's address.
 func (g *Gateway) Addr() string {
 	return g.server.Addr
@@ -175,24 +160,6 @@ func (g *Gateway) Close() error {
 		return err
 	}
 	return nil
-}
-
-// subdomainOptionHandler redirects valid namespaces to subdomains if the option is enabled.
-func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
-	if !g.subdomains {
-		return
-	}
-	loc, ok := g.toSubdomainURL(c.Request)
-	if !ok {
-		render404(c)
-		return
-	}
-
-	// See security note:
-	// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L105
-	c.Request.Header.Set("Clear-Site-Data", "\"cookies\", \"storage\"")
-
-	c.Redirect(http.StatusPermanentRedirect, loc)
 }
 
 // dashboardHandler renders a dev or org dashboard.
@@ -218,6 +185,24 @@ func formatError(err error) string {
 	words := strings.SplitN(err.Error(), " ", 2)
 	words[0] = strings.Title(words[0])
 	return strings.Join(words, " ") + "."
+}
+
+// subdomainOptionHandler redirects valid namespaces to subdomains if the option is enabled.
+func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
+	if !g.subdomains {
+		return
+	}
+	loc, ok := g.toSubdomainURL(c.Request)
+	if !ok {
+		render404(c)
+		return
+	}
+
+	// See security note:
+	// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L105
+	c.Request.Header.Set("Clear-Site-Data", "\"cookies\", \"storage\"")
+
+	c.Redirect(http.StatusPermanentRedirect, loc)
 }
 
 // subdomainHandler handles requests by parsing the request subdomain.
@@ -254,27 +239,14 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 	case "thread":
 		thread, err := core.Decode(key)
 		if err != nil {
-			renderError(c, http.StatusBadRequest, fmt.Errorf("invalid thread ID"))
+			renderError(c, http.StatusBadRequest, errors.New("invalid thread ID"))
 			return
 		}
-		parts := strings.SplitN(strings.TrimSuffix(c.Request.URL.Path, "/"), "/", 4)
-		switch len(parts) {
-		case 1:
-			// @todo: Render something at the thread root
-			render404(c)
-		case 2:
-			if parts[1] != "" {
-				g.renderCollection(c, thread, parts[1])
-			} else {
-				render404(c)
-			}
-		case 3:
-			g.renderInstance(c, thread, parts[1], parts[2], "")
-		case 4:
-			g.renderInstance(c, thread, parts[1], parts[2], parts[3])
-		default:
-			render404(c)
-		}
+		g.renderThread(c, thread)
+	case "buckets":
+		g.renderBucket(c, key, c.Request.URL.Path)
+	case "pins":
+		// @todo
 	default:
 		render404(c)
 	}
@@ -284,7 +256,7 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 // https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L251
 func isSubdomainNamespace(ns string) bool {
 	switch ns {
-	case "ipfs", "ipns", "p2p", "ipld", "thread":
+	case "ipfs", "ipns", "p2p", "ipld", "thread", "buckets", "pins":
 		return true
 	default:
 		return false
@@ -415,4 +387,23 @@ func byteCountDecimal(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "kMGTPE"[exp])
+}
+
+// loadTemplate loads HTML templates.
+func loadTemplate() (*template.Template, error) {
+	t := template.New("")
+	for name, file := range Assets.Files {
+		if file.IsDir() || !strings.HasSuffix(name, ".gohtml") {
+			continue
+		}
+		h, err := ioutil.ReadAll(file)
+		if err != nil {
+			return nil, err
+		}
+		t, err = t.New(name).Parse(string(h))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return t, nil
 }

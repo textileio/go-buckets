@@ -34,6 +34,9 @@ var (
 	// GatewayURL is used to construct externally facing bucket links.
 	GatewayURL string
 
+	// ThreadsGatewayURL is used to construct externally facing bucket links.
+	ThreadsGatewayURL string
+
 	// WWWDomain can be set to specify the domain to use for bucket website hosting, e.g.,
 	// if this is set to mydomain.com, buckets can be rendered as a website at the following URL:
 	//   https://<bucket_key>.mydomain.com
@@ -166,7 +169,7 @@ func (b *Buckets) GetLinksForBucket(
 	pth string,
 	identity did.Token,
 ) (links Links, err error) {
-	links.URL = fmt.Sprintf("%s/thread/%s/%s/%s", GatewayURL, bucket.Thread, collection.Name, bucket.Key)
+	links.URL = fmt.Sprintf("%s/thread/%s/%s/%s", ThreadsGatewayURL, bucket.Thread, collection.Name, bucket.Key)
 	if len(WWWDomain) != 0 {
 		parts := strings.Split(GatewayURL, "://")
 		if len(parts) < 2 {
