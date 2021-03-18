@@ -9,5 +9,6 @@ go/model_pin.go
 go/model_pin_results.go
 go/model_pin_status.go
 go/model_status.go
+go/model_text_matching_strategy.go
 go/routers.go
 main.go

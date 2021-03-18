@@ -190,6 +190,25 @@ func formatError(err error) string {
 	return strings.Join(words, " ") + "."
 }
 
+// getThreadAndKey returns core.ID and bucket key from request params.
+func (g *Gateway) getThreadAndKey(c *gin.Context) (core.ID, string, error) {
+	key := c.Param("key")
+	ipnskey, err := g.ipns.Store().GetByCid(key)
+	if err != nil {
+		return "", "", fmt.Errorf("looking up thread: %v", err)
+	}
+	return ipnskey.ThreadID, key, nil
+}
+
+// getIdentity returns did.Token from request params.
+func getIdentity(c *gin.Context) (did.Token, bool) {
+	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
+	if len(auth) < 2 {
+		return "", false
+	}
+	return did.Token(auth[1]), true
+}
+
 // subdomainOptionHandler redirects valid namespaces to subdomains if the option is enabled.
 func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
 	if !g.subdomains {
@@ -363,29 +382,6 @@ func detectReaderContentType(r io.Reader) (string, io.Reader, error) {
 	}
 	contentType := http.DetectContentType(buf[:])
 	return contentType, io.MultiReader(bytes.NewReader(buf[:n]), r), nil
-}
-
-// getThread returns core.ID from request params.
-func getThread(c *gin.Context) (core.ID, error) {
-	id, err := core.Decode(c.Param("thread"))
-	if err != nil {
-		return "", err
-	}
-	return id, nil
-}
-
-// getKey returns bucket key string (instance ID) from request params.
-func getKey(c *gin.Context) string {
-	return c.Param("key")
-}
-
-// getIdentity returns did.Token from request params.
-func getIdentity(c *gin.Context) (did.Token, bool) {
-	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
-	if len(auth) < 2 {
-		return "", false
-	}
-	return did.Token(auth[1]), true
 }
 
 // byteCountDecimal returns a human readable byte size.
