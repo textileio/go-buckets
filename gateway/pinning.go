@@ -2,32 +2,33 @@ package gateway
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/textileio/go-buckets/pinning/openapi"
+	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 )
 
 func (g *Gateway) listPins(c *gin.Context) {
-	//thread, ok := getThread(c)
-	//if !ok {
-	//	return
-	//}
-	//key := getKey(c)
-	//identity, ok := getIdentity(c)
-	//if !ok {
-	//	return
-	//}
+	thread, key, err := g.getThreadAndKey(c)
+	if err != nil {
+		newFailure(c, http.StatusBadRequest, err)
+		return
+	}
+	identity, ok := getIdentity(c)
+	if !ok {
+		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))
+		return
+	}
+
+	//g.ps.
 }
 
 func (g *Gateway) addPin(c *gin.Context) {
-	thread, err := getThread(c)
+	thread, key, err := g.getThreadAndKey(c)
 	if err != nil {
-		newFailure(c, http.StatusBadRequest, fmt.Errorf("invalid thread ID: %v", err))
+		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
-	key := getKey(c)
 	identity, ok := getIdentity(c)
 	if !ok {
 		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))

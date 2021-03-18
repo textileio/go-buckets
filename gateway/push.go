@@ -40,14 +40,13 @@ type PushPathsResults struct {
 }
 
 func (g *Gateway) pushPaths(c *gin.Context) {
-	thread, err := getThread(c)
+	thread, key, err := g.getThreadAndKey(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
-			Error: fmt.Sprintf("invalid thread ID: %v", err),
+			Error: err.Error(),
 		})
 		return
 	}
-	key := getKey(c)
 	identity, ok := getIdentity(c)
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, PostError{

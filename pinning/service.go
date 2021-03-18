@@ -10,7 +10,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/textileio/go-buckets"
-	"github.com/textileio/go-buckets/pinning/openapi"
+	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 	q "github.com/textileio/go-buckets/pinning/queue"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
@@ -155,22 +155,44 @@ func (s *Service) failRequest(ctx context.Context, r *q.Request) error {
 	return nil
 }
 
-//// GetPinsQuery represents Pin query parameters.
-//type GetPinsQuery struct {
-//	// Cid can be used to filter by one or more Pin Cids.
-//	Cid []string `form:"cid" json:"cid,omitempty"`
-//	// Name can be used to filer by Pin name (by default case-sensitive, exact match).
-//	Name string `form:"name" json:"name,omitempty"`
-//	// Match can be used to customize the text matching strategy applied when Name is present.
-//	Match string `form:"match" json:"match,omitempty"`
-//	// Status can be used to filter by Pin status.
-//	Status []string `form:"status" json:"status,omitempty"`
-//	// Before can by used to filter by before creation (queued) time.
-//	Before *time.Time `form:"before" json:"before,omitempty"`
-//	// After can by used to filter by after creation (queued) time.
-//	After *time.Time `form:"after" json:"after,omitempty"`
-//	// Limit specifies the max number of Pins to return.
-//	Limit *int32 `form:"limit" json:"limit,omitempty"`
-//	// Meta can be used to filter results by Pin metadata.
-//	Meta *map[string]string `form:"meta" json:"meta,omitempty"`
-//}
+// PinQuery represents Pin query parameters.
+type PinQuery struct {
+	// Cid can be used to filter by one or more Pin Cids.
+	Cid []string `form:"cid" json:"cid,omitempty"`
+	// Name can be used to filer by Pin name (by default case-sensitive, exact match).
+	Name string `form:"name" json:"name,omitempty"`
+	// Match can be used to customize the text matching strategy applied when Name is present.
+	Match string `form:"match" json:"match,omitempty"`
+	// Status can be used to filter by Pin status.
+	Status []string `form:"status" json:"status,omitempty"`
+	// Before can by used to filter by before creation (queued) time.
+	Before *time.Time `form:"before" json:"before,omitempty"`
+	// After can by used to filter by after creation (queued) time.
+	After *time.Time `form:"after" json:"after,omitempty"`
+	// Limit specifies the max number of Pins to return.
+	Limit *int32 `form:"limit" json:"limit,omitempty"`
+	// Meta can be used to filter results by Pin metadata.
+	Meta *map[string]string `form:"meta" json:"meta,omitempty"`
+}
+
+func (s *Service) ListPins(
+	thread core.ID,
+	key string,
+	query PinQuery,
+	identity did.Token,
+) ([]openapi.PinStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	defer cancel()
+	buck, err := s.lib.Get(ctx, thread, key, identity)
+	if err != nil {
+		return nil, err
+	}
+
+	reqs, err := s.queue.ListRequests(key, openapi.QUEUED)
+	if err != nil {
+		return nil, fmt.Errorf("listing requests: %v", err)
+	}
+
+	log.Debugf("listed %d requests in %s", len(reqs), key)
+	return reqs, nil
+}
