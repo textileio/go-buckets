@@ -14,8 +14,9 @@ import (
 func (b *Buckets) RemovePath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	root path.Resolved,
+	pth string,
 	identity did.Token,
 ) (int64, *Bucket, error) {
 	lk := b.locks.Get(lock(key))
@@ -31,7 +32,6 @@ func (b *Buckets) RemovePath(
 	if err != nil {
 		return 0, nil, err
 	}
-
 	if root != nil && root.String() != instance.Path {
 		return 0, nil, ErrNonFastForward
 	}

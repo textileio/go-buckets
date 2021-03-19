@@ -3,7 +3,6 @@ package buckets
 // @todo: Validate all thread IDs
 // @todo: Validate all identities
 // @todo: Clean up error messages
-// @todo: Enforce fast-forward-only in SetPath and MovePath, PushPathAccessRoles
 
 import (
 	"context"

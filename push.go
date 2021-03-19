@@ -32,7 +32,7 @@ type PushPathsInput struct {
 }
 
 type PushPathsResult struct {
-	Path   string
+	Path   path.Resolved
 	Cid    c.Cid
 	Size   int64
 	Pinned int64
@@ -238,8 +238,13 @@ func (b *Buckets) PushPaths(
 				})
 				instance.UnsetMetadataWithPrefix(res.path + "/")
 
+				rp, err := dag.NewResolvedPath(res.path)
+				if err != nil {
+					errs <- saveWithErr(fmt.Errorf("resolving result path: %v", err))
+					return
+				}
 				out <- PushPathsResult{
-					Path:   res.path,
+					Path:   rp,
 					Cid:    res.resolved.Cid(),
 					Size:   res.size,
 					Pinned: dag.GetPinnedBytes(ctx2),

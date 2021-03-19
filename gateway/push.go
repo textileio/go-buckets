@@ -130,7 +130,7 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 		select {
 		case res := <-out:
 			results.Results = append(results.Results, PushPathsResult{
-				Path: res.Path,
+				Path: res.Path.String(),
 				Cid:  res.Cid.String(),
 				Size: res.Size,
 			})

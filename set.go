@@ -15,7 +15,9 @@ import (
 func (b *Buckets) SetPath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
+	root path.Resolved,
+	pth string,
 	cid c.Cid,
 	meta map[string]interface{},
 	identity did.Token,
@@ -27,6 +29,9 @@ func (b *Buckets) SetPath(
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
 		return 0, nil, err
+	}
+	if root != nil && root.String() != instance.Path {
+		return 0, nil, ErrNonFastForward
 	}
 
 	pth = trimSlash(pth)

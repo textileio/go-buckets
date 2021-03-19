@@ -194,11 +194,9 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 			return fmt.Errorf("decoding thread: %v", err)
 		}
 		key = payload.Header.Key
-		if len(payload.Header.Root) != 0 {
-			root, err = dag.NewResolvedPath(payload.Header.Root)
-			if err != nil {
-				return fmt.Errorf("resolving root path: %v", err)
-			}
+		root, err = rootFromString(payload.Header.Root)
+		if err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("push bucket path header is required")
@@ -236,7 +234,7 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 		select {
 		case res := <-out:
 			if err := server.Send(&pb.PushPathsResponse{
-				Path:   res.Path,
+				Path:   res.Path.String(),
 				Cid:    res.Cid.String(),
 				Size:   res.Size,
 				Pinned: res.Pinned,
@@ -312,12 +310,16 @@ func (s *Service) SetPath(ctx context.Context, req *pb.SetPathRequest) (*pb.SetP
 	if err != nil {
 		return nil, err
 	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
 	cid, err := c.Decode(req.Cid)
 	if err != nil {
 		return nil, fmt.Errorf("decoding cid: %v", err)
 	}
 
-	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, req.Path, cid, nil, identity)
+	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, root, req.Path, cid, nil, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +335,12 @@ func (s *Service) MovePath(ctx context.Context, req *pb.MovePathRequest) (res *p
 	if err != nil {
 		return nil, err
 	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
 
-	pinned, bucket, err := s.lib.MovePath(ctx, thread, req.Key, req.FromPath, req.ToPath, identity)
+	pinned, bucket, err := s.lib.MovePath(ctx, thread, req.Key, root, req.FromPath, req.ToPath, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -349,15 +355,12 @@ func (s *Service) RemovePath(ctx context.Context, req *pb.RemovePathRequest) (re
 	if err != nil {
 		return nil, err
 	}
-	var root path.Resolved
-	if len(req.Root) != 0 {
-		root, err = dag.NewResolvedPath(req.Root)
-		if err != nil {
-			return nil, fmt.Errorf("resolving root path: %v", err)
-		}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
 	}
 
-	pinned, bucket, err := s.lib.RemovePath(ctx, thread, req.Key, req.Path, root, identity)
+	pinned, bucket, err := s.lib.RemovePath(ctx, thread, req.Key, root, req.Path, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -375,9 +378,13 @@ func (s *Service) PushPathAccessRoles(
 	if err != nil {
 		return nil, err
 	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
 	roles := cast.RolesFromPb(req.Roles)
 
-	pinned, bucket, err := s.lib.PushPathAccessRoles(ctx, thread, req.Key, req.Path, roles, identity)
+	pinned, bucket, err := s.lib.PushPathAccessRoles(ctx, thread, req.Key, root, req.Path, roles, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -405,6 +412,55 @@ func (s *Service) PullPathAccessRoles(
 	}, nil
 }
 
+func (s *Service) PushPathInfo(
+	ctx context.Context,
+	req *pb.PushPathInfoRequest,
+) (res *pb.PushPathInfoResponse, err error) {
+	thread, identity, err := getThreadAndIdentity(ctx, req.Thread)
+	if err != nil {
+		return nil, err
+	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := cast.InfoFromPb(req.Info)
+	if err != nil {
+		return nil, err
+	}
+
+	bucket, err := s.lib.PushPathInfo(ctx, thread, req.Key, root, req.Path, info, identity)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PushPathInfoResponse{
+		Bucket: cast.BucketToPb(bucket),
+	}, nil
+}
+
+func (s *Service) PullPathInfo(
+	ctx context.Context,
+	req *pb.PullPathInfoRequest,
+) (*pb.PullPathInfoResponse, error) {
+	thread, identity, err := getThreadAndIdentity(ctx, req.Thread)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := s.lib.PullPathInfo(ctx, thread, req.Key, req.Path, identity)
+	if err != nil {
+		return nil, err
+	}
+	data, err := cast.InfoToPb(info)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.PullPathInfoResponse{
+		Info: data,
+	}, nil
+}
+
 func getThreadAndIdentity(ctx context.Context, threadStr string) (thread core.ID, identity did.Token, err error) {
 	if len(threadStr) != 0 {
 		thread, err = core.Decode(threadStr)
@@ -417,4 +473,14 @@ func getThreadAndIdentity(ctx context.Context, threadStr string) (thread core.ID
 		return "", "", fmt.Errorf("getting identity token: %v", err)
 	}
 	return thread, identity, nil
+}
+
+func rootFromString(root string) (r path.Resolved, err error) {
+	if len(root) != 0 {
+		r, err = dag.NewResolvedPath(root)
+		if err != nil {
+			return nil, fmt.Errorf("resolving root path: %v", err)
+		}
+	}
+	return r, nil
 }
