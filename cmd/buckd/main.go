@@ -211,6 +211,10 @@ func init() {
 		"threadsAddr",
 		config.Flags["threadsAddr"].DefValue.(string),
 		"Threads API address")
+	rootCmd.PersistentFlags().String(
+		"threadsGatewayUrl",
+		config.Flags["threadsGatewayUrl"].DefValue.(string),
+		"Threads Gateway URL")
 
 	// IPFS
 	rootCmd.PersistentFlags().String(

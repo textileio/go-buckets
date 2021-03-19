@@ -6,11 +6,8 @@ jobs:
   release-platform-builds:
     name: Release Builds
     runs-on: ubuntu-latest
+    container: golang:1.16.0-buster
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.16
       - name: Check out code
         uses: actions/checkout@v1
       - name: Cache dependencies

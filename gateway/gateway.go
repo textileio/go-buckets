@@ -129,11 +129,11 @@ func (g *Gateway) Start() {
 	router.GET("/buckets/:key", g.subdomainOptionHandler, g.bucketHandler)
 	router.GET("/buckets/:key/*path", g.subdomainOptionHandler, g.bucketHandler)
 
-	router.GET("/pins/:key", g.subdomainOptionHandler, g.listPins)
-	router.POST("/pins/:key", g.subdomainOptionHandler, g.addPin)
-	router.GET("/pins/:key/:requestid", g.subdomainOptionHandler, g.getPin)
-	router.POST("/pins/:key/:requestid", g.subdomainOptionHandler, g.replacePin)
-	router.DELETE("/pins/:key/:requestid", g.subdomainOptionHandler, g.removePin)
+	router.GET("/service/:key/pins", g.subdomainOptionHandler, g.listPins)
+	router.POST("/service/:key/pins", g.subdomainOptionHandler, g.addPin)
+	router.GET("/service/:key/pins/:requestid", g.subdomainOptionHandler, g.getPin)
+	router.POST("/service/:key/pins/:requestid", g.subdomainOptionHandler, g.replacePin)
+	router.DELETE("/service/:key/pins/:requestid", g.subdomainOptionHandler, g.removePin)
 
 	router.NoRoute(g.subdomainHandler)
 
