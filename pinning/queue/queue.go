@@ -109,70 +109,70 @@ func newIDFromTime(t time.Time) string {
 	return strings.ToLower(ulid.MustNew(ulid.Timestamp(t.UTC()), rand.Reader).String())
 }
 
-func (q *Queue) AddRequest(thread core.ID, bucket string, status *openapi.PinStatus, identity did.Token) error {
+func (q *Queue) AddRequest(thread core.ID, key string, status *openapi.PinStatus, identity did.Token) error {
 	return q.enqueue(&Request{
 		ID:       status.Requestid,
 		Cid:      status.Pin.Cid,
 		Thread:   thread,
-		Key:      bucket,
+		Key:      key,
 		Identity: identity,
 	}, true)
 }
 
-func (q *Queue) ListRequests(key string, status openapi.Status, before, after time.Time, limit int) ([]Request, error) {
-	pre, err := getStatusKeyPrefix(status)
-	if err != nil {
-		return nil, fmt.Errorf("getting status prefix: %v", err)
-	}
-	var filters []query.Filter
-	if !before.IsZero() {
-		filters = append(filters, query.FilterKeyCompare{
-			Op:  query.LessThan,
-			Key: getStatusKey(pre, key, newIDFromTime(before)).String(),
-		})
-	}
-	if !after.IsZero() {
-		filters = append(filters, query.FilterKeyCompare{
-			Op:  query.GreaterThan,
-			Key: getStatusKey(pre, key, newIDFromTime(after)).String(),
-		})
-	}
+func (q *Queue) ListRequests(key string, status []openapi.Status, before, after time.Time, limit int) ([]string, error) {
+	var reqs []string
 	if limit <= 0 {
 		limit = defaultListLimit
 	} else if limit > maxListLimit {
 		limit = maxListLimit
 	}
-	results, err := q.store.Query(query.Query{
-		Prefix:  pre.String(),
-		Filters: filters,
-		Orders:  []query.Order{query.OrderByKey{}},
-		Limit:   limit,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("querying requests: %v", err)
-	}
-	defer results.Close()
 
-	var reqs []Request
-	for res := range results.Next() {
-		if res.Error != nil {
-			return nil, fmt.Errorf("getting next result: %v", res.Error)
-		}
-		r, err := decode(res.Value)
+	for _, s := range status {
+		pre, err := getStatusKeyPrefix(s)
 		if err != nil {
-			return nil, fmt.Errorf("decoding request: %v", err)
+			return nil, fmt.Errorf("getting status prefix: %v", err)
 		}
-		reqs = append(reqs, *r)
+		var filters []query.Filter
+		if !before.IsZero() {
+			filters = append(filters, query.FilterKeyCompare{
+				Op:  query.LessThan,
+				Key: getStatusKey(pre, key, newIDFromTime(before)).String(),
+			})
+		}
+		if !after.IsZero() {
+			filters = append(filters, query.FilterKeyCompare{
+				Op:  query.GreaterThan,
+				Key: getStatusKey(pre, key, newIDFromTime(after)).String(),
+			})
+		}
+		results, err := q.store.Query(query.Query{
+			Prefix:  pre.ChildString(key).String(),
+			Filters: filters,
+			Orders:  []query.Order{query.OrderByKey{}},
+			Limit:   limit,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("querying requests: %v", err)
+		}
+
+		for res := range results.Next() {
+			if res.Error != nil {
+				results.Close()
+				return nil, fmt.Errorf("getting next result: %v", res.Error)
+			}
+			reqs = append(reqs, strings.TrimPrefix(res.Key, pre.ChildString(key).String()+"/"))
+		}
+		results.Close()
 	}
 	return reqs, nil
 }
 
-func (q *Queue) GetRequest(bucket, id string, status openapi.Status) (*Request, error) {
+func (q *Queue) GetRequest(key, id string, status openapi.Status) (*Request, error) {
 	pre, err := getStatusKeyPrefix(status)
 	if err != nil {
 		return nil, fmt.Errorf("getting status prefix: %v", err)
 	}
-	val, err := q.store.Get(getStatusKey(pre, bucket, id))
+	val, err := q.store.Get(getStatusKey(pre, key, id))
 	if err != nil {
 		return nil, fmt.Errorf("getting status key: %v", err)
 	}

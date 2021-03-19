@@ -2,6 +2,8 @@ package pinning
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,25 +21,102 @@ import (
 var (
 	log = logging.Logger("buckets/ps")
 
+	// ErrPinNotFound a pin was not found.
+	ErrPinNotFound = errors.New("pin not found")
+
 	statusTimeout = time.Minute
 	pinTimeout    = time.Hour
 )
 
+// Service provides a bucket-based IPFS Pinning Service based on the OpenAPI spec:
+// https://github.com/ipfs/pinning-services-api-spec
 type Service struct {
 	lib   *buckets.Buckets
 	queue *q.Queue
 }
 
+// NewService returns a new Service.
 func NewService(lib *buckets.Buckets, store ds.TxnDatastore) *Service {
 	s := &Service{lib: lib}
 	s.queue = q.NewQueue(store, s.handleRequest, s.failRequest)
 	return s
 }
 
+// Close the Service.
 func (s *Service) Close() error {
 	return s.queue.Close()
 }
 
+// Query represents Pin query parameters.
+type Query struct {
+	// Cid can be used to filter by one or more Pin Cids.
+	Cid []string `form:"cid" json:"cid,omitempty"`
+	// Name can be used to filer by Pin name (by default case-sensitive, exact match).
+	Name string `form:"name" json:"name,omitempty"`
+	// Match can be used to customize the text matching strategy applied when Name is present.
+	Match string `form:"match" json:"match,omitempty"`
+	// Status can be used to filter by Pin status.
+	Status []openapi.Status `form:"status" json:"status,omitempty"`
+	// Before can by used to filter by before creation (queued) time.
+	Before *time.Time `form:"before" json:"before,omitempty"`
+	// After can by used to filter by after creation (queued) time.
+	After *time.Time `form:"after" json:"after,omitempty"`
+	// Limit specifies the max number of Pins to return.
+	Limit *int32 `form:"limit" json:"limit,omitempty"`
+	// Meta can be used to filter results by Pin metadata.
+	Meta *map[string]string `form:"meta" json:"meta,omitempty"`
+}
+
+// ListPins returns a list of openapi.PinStatus matching the Query.
+func (s *Service) ListPins(
+	thread core.ID,
+	key string,
+	query Query,
+	identity did.Token,
+) ([]openapi.PinStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	defer cancel()
+	buck, err := s.lib.Get(ctx, thread, key, identity)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		before, after time.Time
+		limit         int
+	)
+	if query.Before != nil {
+		before = *query.Before
+	}
+	if query.After != nil {
+		after = *query.After
+	}
+	if query.Limit != nil {
+		limit = int(*query.Limit)
+	}
+
+	ids, err := s.queue.ListRequests(key, query.Status, before, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing requests: %v", err)
+	}
+
+	var stats []openapi.PinStatus
+	for _, r := range ids {
+		md, ok := buck.Metadata[r].Info["pin"]
+		if ok {
+			status, err := statusFromMeta(md)
+			if err != nil {
+				return nil, err
+			}
+			stats = append(stats, status)
+		}
+	}
+
+	log.Debugf("listed %d requests in %s", len(stats), key)
+	return stats, nil
+}
+
+// AddPin adds an openapi.Pin to a bucket.
 func (s *Service) AddPin(
 	thread core.ID,
 	key string,
@@ -46,8 +125,8 @@ func (s *Service) AddPin(
 ) (*openapi.PinStatus, error) {
 	status := &openapi.PinStatus{
 		Requestid: s.queue.NewID(),
-		Created:   time.Now(),
 		Status:    openapi.QUEUED,
+		Created:   time.Now(),
 		Pin:       pin,
 	}
 
@@ -75,7 +154,7 @@ func (s *Service) AddPin(
 		return nil, fmt.Errorf("adding request: %v", err)
 	}
 
-	log.Debugf("added request: %s", status.Requestid)
+	log.Debugf("added request %s in %s", status.Requestid, key)
 	return status, nil
 }
 
@@ -155,44 +234,41 @@ func (s *Service) failRequest(ctx context.Context, r *q.Request) error {
 	return nil
 }
 
-// PinQuery represents Pin query parameters.
-type PinQuery struct {
-	// Cid can be used to filter by one or more Pin Cids.
-	Cid []string `form:"cid" json:"cid,omitempty"`
-	// Name can be used to filer by Pin name (by default case-sensitive, exact match).
-	Name string `form:"name" json:"name,omitempty"`
-	// Match can be used to customize the text matching strategy applied when Name is present.
-	Match string `form:"match" json:"match,omitempty"`
-	// Status can be used to filter by Pin status.
-	Status []string `form:"status" json:"status,omitempty"`
-	// Before can by used to filter by before creation (queued) time.
-	Before *time.Time `form:"before" json:"before,omitempty"`
-	// After can by used to filter by after creation (queued) time.
-	After *time.Time `form:"after" json:"after,omitempty"`
-	// Limit specifies the max number of Pins to return.
-	Limit *int32 `form:"limit" json:"limit,omitempty"`
-	// Meta can be used to filter results by Pin metadata.
-	Meta *map[string]string `form:"meta" json:"meta,omitempty"`
-}
-
-func (s *Service) ListPins(
+// GetPin returns an openapi.PinStatus.
+func (s *Service) GetPin(
 	thread core.ID,
 	key string,
-	query PinQuery,
+	id string,
 	identity did.Token,
-) ([]openapi.PinStatus, error) {
+) (status openapi.PinStatus, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
 	defer cancel()
 	buck, err := s.lib.Get(ctx, thread, key, identity)
 	if err != nil {
-		return nil, err
+		return status, err
 	}
 
-	reqs, err := s.queue.ListRequests(key, openapi.QUEUED)
+	md, ok := buck.Metadata[id].Info["pin"]
+	if ok {
+		status, err = statusFromMeta(md)
+		if err != nil {
+			return status, err
+		}
+	} else {
+		return status, ErrPinNotFound
+	}
+
+	log.Debugf("got requests %s in %s", id, key)
+	return status, nil
+}
+
+func statusFromMeta(m interface{}) (status openapi.PinStatus, err error) {
+	data, err := json.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("listing requests: %v", err)
+		return status, fmt.Errorf("marshalling request: %v", err)
 	}
-
-	log.Debugf("listed %d requests in %s", len(reqs), key)
-	return reqs, nil
+	if err := json.Unmarshal(data, &status); err != nil {
+		return status, fmt.Errorf("unmarshalling request: %v", err)
+	}
+	return status, nil
 }
