@@ -17,7 +17,9 @@ import (
 func (b *Buckets) PushPathAccessRoles(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
+	root path.Resolved,
+	pth string,
 	roles map[did.DID]collection.Role,
 	identity did.Token,
 ) (int64, *Bucket, error) {
@@ -34,6 +36,10 @@ func (b *Buckets) PushPathAccessRoles(
 	if err != nil {
 		return 0, nil, err
 	}
+	if root != nil && root.String() != instance.Path {
+		return 0, nil, ErrNonFastForward
+	}
+
 	linkKey := instance.GetLinkEncryptionKey()
 	pathNode, err := dag.GetNodeAtPath(ctx, b.ipfs, bpth, linkKey)
 	if err != nil {

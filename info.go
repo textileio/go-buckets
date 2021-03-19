@@ -5,35 +5,41 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
 
-func (b *Buckets) PushPathMetadata(
+func (b *Buckets) PushPathInfo(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
+	root path.Resolved,
+	pth string,
 	info map[string]interface{},
 	identity did.Token,
-) error {
+) (*Bucket, error) {
 	lk := b.locks.Get(lock(key))
 	lk.Acquire()
 	defer lk.Release()
 
 	pth, err := parsePath(pth)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if root != nil && root.String() != instance.Path {
+		return nil, ErrNonFastForward
 	}
 
 	md, mdPath, ok := instance.GetMetadataForPath(pth, false)
 	if !ok {
-		return fmt.Errorf("could not resolve path: %s", pth)
+		return nil, fmt.Errorf("could not resolve path: %s", pth)
 	}
 	var target collection.Metadata
 	if mdPath != pth { // If the metadata is inherited from a parent, create a new entry
@@ -60,33 +66,36 @@ func (b *Buckets) PushPathMetadata(
 		target.UpdatedAt = instance.UpdatedAt
 		instance.Metadata[pth] = target
 		if err := b.c.Save(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	log.Debugf("pushed metadata for %s in %s", pth, key)
-	return nil
+	log.Debugf("pushed info for %s in %s", pth, key)
+	return instanceToBucket(thread, instance), nil
 }
 
-func (b *Buckets) PullPathMetadata(
+func (b *Buckets) PullPathInfo(
 	ctx context.Context,
 	thread core.ID,
 	key, pth string,
 	identity did.Token,
-) (md collection.Metadata, err error) {
-	pth, err = parsePath(pth)
+) (map[string]interface{}, error) {
+	pth, err := parsePath(pth)
 	if err != nil {
-		return md, err
+		return nil, err
 	}
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
-		return md, err
+		return nil, err
 	}
 	md, _, ok := instance.GetMetadataForPath(pth, false)
 	if !ok {
-		return md, fmt.Errorf("could not resolve path: %s", pth)
+		return nil, fmt.Errorf("could not resolve path: %s", pth)
+	}
+	if md.Info == nil {
+		md.Info = make(map[string]interface{})
 	}
 
-	log.Debugf("pulled metadata for %s in %s", pth, key)
-	return md, nil
+	log.Debugf("pulled info for %s in %s", pth, key)
+	return md.Info, nil
 }

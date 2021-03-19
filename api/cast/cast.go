@@ -139,6 +139,18 @@ func RolesFromPb(roles map[string]pb.PathAccessRole) map[did.DID]collection.Role
 	return croles
 }
 
+func InfoToPb(info map[string]interface{}) ([]byte, error) {
+	return json.Marshal(info)
+}
+
+func InfoFromPb(info []byte) (map[string]interface{}, error) {
+	var pinfo map[string]interface{}
+	if err := json.Unmarshal(info, &pinfo); err != nil {
+		return nil, err
+	}
+	return pinfo, nil
+}
+
 func LinksToPb(links buckets.Links) *pb.Links {
 	return &pb.Links{
 		Url:  links.URL,

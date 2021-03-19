@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/textileio/go-buckets"
@@ -128,7 +129,7 @@ func (b *Bucket) watchPush(ctx context.Context, events chan<- Event) error {
 	}()
 	if _, err := b.PushLocal(ctx, WithEvents(events)); errors.Is(err, ErrUpToDate) {
 		return nil
-	} else if errors.Is(err, buckets.ErrNonFastForward) {
+	} else if err != nil && strings.Contains(err.Error(), buckets.ErrNonFastForward.Error()) {
 		// Pull remote changes
 		if _, err = b.PullRemote(ctx, WithEvents(events)); err != nil {
 			return err

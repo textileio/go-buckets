@@ -95,10 +95,7 @@ func (c *Client) NewTokenContext(
 
 // Create initializes a new bucket.
 // The bucket name is only meant to help identify a bucket in a UI and is not unique.
-func (c *Client) Create(
-	ctx context.Context,
-	opts ...buckets.CreateOption,
-) (*pb.CreateResponse, error) {
+func (c *Client) Create(ctx context.Context, opts ...buckets.CreateOption) (*pb.CreateResponse, error) {
 	args := &buckets.CreateOptions{}
 	for _, opt := range opts {
 		opt(args)
@@ -598,20 +595,46 @@ func (c *Client) SetPath(
 	thread core.ID,
 	key, pth string,
 	remoteCid cid.Cid,
+	opts ...buckets.Option,
 ) (*pb.SetPathResponse, error) {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
 	return c.c.SetPath(ctx, &pb.SetPathRequest{
 		Thread: thread.String(),
 		Key:    key,
+		Root:   xr,
 		Path:   filepath.ToSlash(pth),
 		Cid:    remoteCid.String(),
 	})
 }
 
 // MovePath moves a particular path to another path in the existing IPFS UnixFS DAG.
-func (c *Client) MovePath(ctx context.Context, thread core.ID, key, pth string, dest string) error {
+func (c *Client) MovePath(
+	ctx context.Context,
+	thread core.ID,
+	key, pth string, dest string,
+	opts ...buckets.Option,
+) error {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
 	_, err := c.c.MovePath(ctx, &pb.MovePathRequest{
 		Thread:   thread.String(),
 		Key:      key,
+		Root:     xr,
 		FromPath: filepath.ToSlash(pth),
 		ToPath:   filepath.ToSlash(dest),
 	})
@@ -630,6 +653,7 @@ func (c *Client) RemovePath(
 	for _, opt := range opts {
 		opt(args)
 	}
+
 	var xr string
 	if args.Root != nil {
 		xr = args.Root.String()
@@ -637,8 +661,8 @@ func (c *Client) RemovePath(
 	res, err := c.c.RemovePath(ctx, &pb.RemovePathRequest{
 		Thread: thread.String(),
 		Key:    key,
-		Path:   filepath.ToSlash(pth),
 		Root:   xr,
+		Path:   filepath.ToSlash(pth),
 	})
 	if err != nil {
 		return nil, err
@@ -655,10 +679,21 @@ func (c *Client) PushPathAccessRoles(
 	thread core.ID,
 	key, pth string,
 	roles map[did.DID]collection.Role,
+	opts ...buckets.Option,
 ) error {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
 	_, err := c.c.PushPathAccessRoles(ctx, &pb.PushPathAccessRolesRequest{
 		Thread: thread.String(),
 		Key:    key,
+		Root:   xr,
 		Path:   filepath.ToSlash(pth),
 		Roles:  cast.RolesToPb(roles),
 	})
@@ -680,4 +715,53 @@ func (c *Client) PullPathAccessRoles(
 		return nil, err
 	}
 	return cast.RolesFromPb(res.Roles), nil
+}
+
+// PushPathInfo updates path info by merging the pushed info with existing info.
+func (c *Client) PushPathInfo(
+	ctx context.Context,
+	thread core.ID,
+	key, pth string,
+	info map[string]interface{},
+	opts ...buckets.Option,
+) error {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
+
+	data, err := cast.InfoToPb(info)
+	if err != nil {
+		return err
+	}
+	_, err = c.c.PushPathInfo(ctx, &pb.PushPathInfoRequest{
+		Thread: thread.String(),
+		Key:    key,
+		Root:   xr,
+		Path:   filepath.ToSlash(pth),
+		Info:   data,
+	})
+	return err
+}
+
+// PullPathInfo returns info for a path.
+func (c *Client) PullPathInfo(
+	ctx context.Context,
+	thread core.ID,
+	key, pth string,
+) (map[string]interface{}, error) {
+	res, err := c.c.PullPathInfo(ctx, &pb.PullPathInfoRequest{
+		Thread: thread.String(),
+		Key:    key,
+		Path:   filepath.ToSlash(pth),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cast.InfoFromPb(res.Info)
 }

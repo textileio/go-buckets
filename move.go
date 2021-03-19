@@ -17,7 +17,9 @@ import (
 func (b *Buckets) MovePath(
 	ctx context.Context,
 	thread core.ID,
-	key, fpth, tpth string,
+	key string,
+	root path.Resolved,
+	fpth, tpth string,
 	identity did.Token,
 ) (int64, *Bucket, error) {
 	lk := b.locks.Get(lock(key))
@@ -44,6 +46,9 @@ func (b *Buckets) MovePath(
 	instance, pth, err := b.getBucketAndPath(ctx, thread, key, fpth, identity)
 	if err != nil {
 		return 0, nil, fmt.Errorf("getting path: %v", err)
+	}
+	if root != nil && root.String() != instance.Path {
+		return 0, nil, ErrNonFastForward
 	}
 
 	instance.UpdatedAt = time.Now().UnixNano()

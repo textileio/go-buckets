@@ -1,10 +1,13 @@
 package queue
 
+// @todo: Don't save entire request in status queues
+
 import (
 	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +15,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/oklog/ulid/v2"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 	"github.com/textileio/go-threads/core/did"
@@ -59,6 +63,7 @@ type Request struct {
 
 	Thread   core.ID
 	Key      string
+	Root     path.Resolved
 	Identity did.Token
 }
 
@@ -109,12 +114,19 @@ func newIDFromTime(t time.Time) string {
 	return strings.ToLower(ulid.MustNew(ulid.Timestamp(t.UTC()), rand.Reader).String())
 }
 
-func (q *Queue) AddRequest(thread core.ID, key string, status *openapi.PinStatus, identity did.Token) error {
+func (q *Queue) AddRequest(
+	thread core.ID,
+	key string,
+	root path.Resolved,
+	status *openapi.PinStatus,
+	identity did.Token,
+) error {
 	return q.enqueue(&Request{
 		ID:       status.Requestid,
 		Cid:      status.Pin.Cid,
 		Thread:   thread,
 		Key:      key,
+		Root:     root,
 		Identity: identity,
 	}, true)
 }
@@ -146,10 +158,11 @@ func (q *Queue) ListRequests(key string, status []openapi.Status, before, after 
 			})
 		}
 		results, err := q.store.Query(query.Query{
-			Prefix:  pre.ChildString(key).String(),
-			Filters: filters,
-			Orders:  []query.Order{query.OrderByKey{}},
-			Limit:   limit,
+			Prefix:   pre.ChildString(key).String(),
+			Filters:  filters,
+			Orders:   []query.Order{query.OrderByKey{}},
+			Limit:    limit,
+			KeysOnly: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("querying requests: %v", err)
@@ -177,6 +190,44 @@ func (q *Queue) GetRequest(key, id string, status openapi.Status) (*Request, err
 		return nil, fmt.Errorf("getting status key: %v", err)
 	}
 	return decode(val)
+}
+
+func (q *Queue) RemoveRequest(key, id string) error {
+	txn, err := q.store.NewTransaction(false)
+	if err != nil {
+		return fmt.Errorf("creating txn: %v", err)
+	}
+	defer txn.Discard()
+
+	// Bail if pinning in progress by looking at the "pinning" status queue
+	// @todo: Support removal of in-progress requests
+	val, err := txn.Get(getStatusKey(dsPinningStatusPrefix, key, id))
+	if err != nil && !errors.Is(err, ds.ErrNotFound) {
+		return fmt.Errorf("getting status key: %v", err)
+	} else if val != nil {
+		return fmt.Errorf("cannot remove in-progress request: %v", err)
+	}
+
+	// Delete from global queue
+	if err := txn.Delete(dsQueuePrefix.ChildString(id)); err != nil {
+		return fmt.Errorf("deleting key: %v", err)
+	}
+
+	// Remove from all possible status queues
+	if err := txn.Delete(getStatusKey(dsQueuedStatusPrefix, key, id)); err != nil {
+		return fmt.Errorf("deleting status key: %v", err)
+	}
+	if err := txn.Delete(getStatusKey(dsPinnedStatusPrefix, key, id)); err != nil {
+		return fmt.Errorf("deleting status key: %v", err)
+	}
+	if err := txn.Delete(getStatusKey(dsFailedStatusPrefix, key, id)); err != nil {
+		return fmt.Errorf("deleting status key: %v", err)
+	}
+
+	if err := txn.Commit(); err != nil {
+		return fmt.Errorf("committing txn: %v", err)
+	}
+	return nil
 }
 
 func (q *Queue) enqueue(r *Request, isNew bool) error {
