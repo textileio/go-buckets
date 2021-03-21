@@ -1,6 +1,7 @@
 package queue
 
 // @todo: Don't save entire request in status queues
+// @todo: Add doc strings
 
 import (
 	"bytes"
@@ -9,24 +10,27 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/query"
+	dsq "github.com/ipfs/go-datastore/query"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/oklog/ulid/v2"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
+	dsextensions "github.com/textileio/go-datastore-extensions"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
+	kt "github.com/textileio/go-threads/db/keytransform"
 )
 
 var (
 	log = logging.Logger("buckets/ps-queue")
 
-	// Interval is the interval between background queue ticks.
-	Interval = time.Second * 10
+	// StartDelay is the time delay before the queue will process queued request on start.
+	StartDelay = time.Second * 10
 
 	// MaxConcurrency is the maximum number of requests that will be handled concurrently.
 	MaxConcurrency = 100
@@ -57,6 +61,14 @@ const (
 	maxListLimit     = 1000
 )
 
+func NewID() string {
+	return NewIDFromTime(time.Now())
+}
+
+func NewIDFromTime(t time.Time) string {
+	return strings.ToLower(ulid.MustNew(ulid.Timestamp(t.UTC()), rand.Reader).String())
+}
+
 type Request struct {
 	ID  string
 	Cid string
@@ -67,27 +79,54 @@ type Request struct {
 	Identity did.Token
 }
 
-type RequestHandler func(ctx context.Context, request *Request) error
+type Query struct {
+	Cid    []string                     // todo
+	Name   string                       // todo
+	Match  openapi.TextMatchingStrategy // todo
+	Status []openapi.Status
+	Before string // ulid.ULID string
+	After  string // ulid.ULID string
+	Limit  int
+	Meta   map[string]string // todo
+}
+
+func (q Query) setDefaults() Query {
+	if len(q.Status) == 0 {
+		q.Status = []openapi.Status{openapi.PINNED}
+	}
+	if q.Limit == -1 {
+		q.Limit = maxListLimit
+	} else if q.Limit <= 0 {
+		q.Limit = defaultListLimit
+	} else if q.Limit > maxListLimit {
+		q.Limit = maxListLimit
+	}
+	return q
+}
+
+type RequestHandler func(ctx context.Context, request Request) error
 
 type Queue struct {
-	store ds.TxnDatastore
+	store kt.TxnDatastoreExtended
 
 	handler        RequestHandler
 	failureHandler RequestHandler
 
-	jobCh chan *Request
+	jobCh  chan Request
+	doneCh chan struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewQueue(store ds.TxnDatastore, handler RequestHandler, failureHandler RequestHandler) *Queue {
+func NewQueue(store kt.TxnDatastoreExtended, handler RequestHandler, failureHandler RequestHandler) *Queue {
 	ctx, cancel := context.WithCancel(context.Background())
 	q := &Queue{
 		store:          store,
 		handler:        handler,
 		failureHandler: failureHandler,
-		jobCh:          make(chan *Request, MaxConcurrency),
+		jobCh:          make(chan Request, MaxConcurrency),
+		doneCh:         make(chan struct{}, MaxConcurrency),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -106,63 +145,47 @@ func (q *Queue) Close() error {
 	return nil
 }
 
-func (q *Queue) NewID() string {
-	return newIDFromTime(time.Now())
-}
-
-func newIDFromTime(t time.Time) string {
-	return strings.ToLower(ulid.MustNew(ulid.Timestamp(t.UTC()), rand.Reader).String())
-}
-
-func (q *Queue) AddRequest(
-	thread core.ID,
-	key string,
-	root path.Resolved,
-	status *openapi.PinStatus,
-	identity did.Token,
-) error {
-	return q.enqueue(&Request{
-		ID:       status.Requestid,
-		Cid:      status.Pin.Cid,
-		Thread:   thread,
-		Key:      key,
-		Root:     root,
-		Identity: identity,
-	}, true)
-}
-
-func (q *Queue) ListRequests(key string, status []openapi.Status, before, after time.Time, limit int) ([]string, error) {
-	var reqs []string
-	if limit <= 0 {
-		limit = defaultListLimit
-	} else if limit > maxListLimit {
-		limit = maxListLimit
+// ListRequests lists request for key by applying a Query.
+// This is optimize for single-status queries (the default query is for only openapi.PINNED requests).
+func (q *Queue) ListRequests(key string, query Query) ([]string, error) {
+	query = query.setDefaults()
+	if len(query.Before) != 0 && len(query.After) != 0 {
+		return nil, fmt.Errorf("before and after cannot be used together")
+	}
+	var order dsq.Order = dsq.OrderByKey{}
+	if len(query.Before) != 0 {
+		order = dsq.OrderByKeyDescending{}
 	}
 
-	for _, s := range status {
+	var all []string
+	for _, s := range query.Status {
+		var reqs []string
+
 		pre, err := getStatusKeyPrefix(s)
 		if err != nil {
 			return nil, fmt.Errorf("getting status prefix: %v", err)
 		}
-		var filters []query.Filter
-		if !before.IsZero() {
-			filters = append(filters, query.FilterKeyCompare{
-				Op:  query.LessThan,
-				Key: getStatusKey(pre, key, newIDFromTime(before)).String(),
-			})
+
+		var (
+			seek  string
+			limit = query.Limit
+		)
+		if len(query.Before) != 0 {
+			seek = getStatusKey(pre, key, query.Before).String()
+			limit++
+		} else if len(query.After) != 0 {
+			seek = getStatusKey(pre, key, query.After).String()
+			limit++
 		}
-		if !after.IsZero() {
-			filters = append(filters, query.FilterKeyCompare{
-				Op:  query.GreaterThan,
-				Key: getStatusKey(pre, key, newIDFromTime(after)).String(),
-			})
-		}
-		results, err := q.store.Query(query.Query{
-			Prefix:   pre.ChildString(key).String(),
-			Filters:  filters,
-			Orders:   []query.Order{query.OrderByKey{}},
-			Limit:    limit,
-			KeysOnly: true,
+
+		results, err := q.store.QueryExtended(dsextensions.QueryExt{
+			Query: dsq.Query{
+				Prefix:   pre.ChildString(key).String(),
+				Orders:   []dsq.Order{order},
+				Limit:    limit,
+				KeysOnly: true,
+			},
+			SeekPrefix: seek,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("querying requests: %v", err)
@@ -176,8 +199,38 @@ func (q *Queue) ListRequests(key string, status []openapi.Status, before, after 
 			reqs = append(reqs, strings.TrimPrefix(res.Key, pre.ChildString(key).String()+"/"))
 		}
 		results.Close()
+
+		if len(seek) != 0 && len(reqs) > 0 {
+			// Remove seek (first) element
+			reqs = reqs[1:]
+		}
+
+		all = append(all, reqs...)
 	}
-	return reqs, nil
+
+	// If the query contains multiple statuses, we have to sort and limit globally
+	if len(query.Status) > 1 {
+		switch order.(type) {
+		case dsq.OrderByKeyDescending:
+			sort.Slice(all, func(i, j int) bool {
+				return all[i] > all[j]
+			})
+		default:
+			sort.Slice(all, func(i, j int) bool {
+				return all[i] < all[j]
+			})
+		}
+
+		if len(all) > query.Limit {
+			all = all[:query.Limit]
+		}
+	}
+
+	return all, nil
+}
+
+func (q *Queue) AddRequest(r Request) error {
+	return q.enqueue(r, true)
 }
 
 func (q *Queue) GetRequest(key, id string, status openapi.Status) (*Request, error) {
@@ -189,7 +242,11 @@ func (q *Queue) GetRequest(key, id string, status openapi.Status) (*Request, err
 	if err != nil {
 		return nil, fmt.Errorf("getting status key: %v", err)
 	}
-	return decode(val)
+	r, err := decode(val)
+	if err != nil {
+		return nil, fmt.Errorf("decoding request: %v", err)
+	}
+	return &r, nil
 }
 
 func (q *Queue) RemoveRequest(key, id string) error {
@@ -205,7 +262,7 @@ func (q *Queue) RemoveRequest(key, id string) error {
 	if err != nil && !errors.Is(err, ds.ErrNotFound) {
 		return fmt.Errorf("getting status key: %v", err)
 	} else if val != nil {
-		return fmt.Errorf("cannot remove in-progress request: %v", err)
+		return errors.New("cannot remove in-progress request")
 	}
 
 	// Delete from global queue
@@ -230,7 +287,7 @@ func (q *Queue) RemoveRequest(key, id string) error {
 	return nil
 }
 
-func (q *Queue) enqueue(r *Request, isNew bool) error {
+func (q *Queue) enqueue(r Request, isNew bool) error {
 	// Block while the request is placed in a queue
 	if isNew {
 		val, err := encode(r)
@@ -264,20 +321,22 @@ func (q *Queue) enqueue(r *Request, isNew bool) error {
 }
 
 func (q *Queue) start() {
-	t := time.NewTicker(Interval)
+	t := time.NewTimer(StartDelay)
 	for {
 		select {
-		case <-t.C:
-			q.process()
 		case <-q.ctx.Done():
 			t.Stop()
 			return
+		case <-t.C:
+			q.getNext()
+		case <-q.doneCh:
+			q.getNext()
 		}
 	}
 }
 
-func (q *Queue) process() {
-	queue, err := q.listQueued()
+func (q *Queue) getNext() {
+	queue, err := q.getQueued()
 	if err != nil {
 		log.Errorf("listing requests: %v", err)
 		return
@@ -286,17 +345,17 @@ func (q *Queue) process() {
 		log.Debugf("enqueueing %d requests", len(queue))
 	}
 	for _, r := range queue {
-		if err := q.enqueue(&r, false); err != nil {
+		if err := q.enqueue(r, false); err != nil {
 			log.Errorf("enqueueing request: %v", err)
 		}
 	}
 }
 
-func (q *Queue) listQueued() ([]Request, error) {
-	results, err := q.store.Query(query.Query{
+func (q *Queue) getQueued() ([]Request, error) {
+	results, err := q.store.Query(dsq.Query{
 		Prefix: dsQueuePrefix.String(),
-		Orders: []query.Order{query.OrderByKey{}},
-		Limit:  MaxConcurrency,
+		Orders: []dsq.Order{dsq.OrderByKey{}},
+		Limit:  1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("querying requests: %v", err)
@@ -312,7 +371,7 @@ func (q *Queue) listQueued() ([]Request, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decoding request: %v", err)
 		}
-		reqs = append(reqs, *r)
+		reqs = append(reqs, r)
 	}
 	return reqs, nil
 }
@@ -335,9 +394,9 @@ func (q *Queue) worker(num int) {
 				status = openapi.FAILED
 
 				// The handler returned an error, send the request to the failure handler
-				log.Errorf("handling request: %v", err)
+				log.Debugf("error handling request: %v", err)
 				if err := q.failureHandler(q.ctx, r); err != nil {
-					log.Errorf("failing request: %v", err)
+					log.Debugf("error failing request: %v", err)
 				}
 			}
 
@@ -347,11 +406,12 @@ func (q *Queue) worker(num int) {
 			}
 
 			log.Debugf("worker %d finished job %s", num, r.ID)
+			q.doneCh <- struct{}{}
 		}
 	}
 }
 
-func (q *Queue) moveRequest(r *Request, from, to openapi.Status) error {
+func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	fromPre, err := getStatusKeyPrefix(from)
 	if err != nil {
 		return fmt.Errorf("getting 'from' prefix: %v", err)
@@ -420,7 +480,7 @@ func getStatusKey(pre ds.Key, key, id string) ds.Key {
 	return pre.ChildString(key).ChildString(id)
 }
 
-func encode(r *Request) ([]byte, error) {
+func encode(r Request) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(r); err != nil {
 		return nil, fmt.Errorf("encoding request: %v", err)
@@ -428,13 +488,14 @@ func encode(r *Request) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func decode(v []byte) (*Request, error) {
+func decode(v []byte) (r Request, err error) {
 	var buf bytes.Buffer
-	buf.Write(v)
-	dec := gob.NewDecoder(&buf)
-	var r Request
-	if err := dec.Decode(&r); err != nil {
-		return nil, fmt.Errorf("decoding key value: %v", err)
+	if _, err := buf.Write(v); err != nil {
+		return r, fmt.Errorf("writing key value: %v", err)
 	}
-	return &r, nil
+	dec := gob.NewDecoder(&buf)
+	if err := dec.Decode(&r); err != nil {
+		return r, fmt.Errorf("decoding key value: %v", err)
+	}
+	return r, nil
 }

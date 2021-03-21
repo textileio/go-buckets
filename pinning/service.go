@@ -1,5 +1,9 @@
 package pinning
 
+// @todo: Handle remaining query types
+// @todo: Add delegates field to responses
+// @todo: Leverage origins when setting path
+
 import (
 	"context"
 	"encoding/json"
@@ -8,16 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/textileio/go-buckets/dag"
-
 	c "github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/dag"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 	q "github.com/textileio/go-buckets/pinning/queue"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
+	kt "github.com/textileio/go-threads/db/keytransform"
 )
 
 var (
@@ -38,7 +41,7 @@ type Service struct {
 }
 
 // NewService returns a new Service.
-func NewService(lib *buckets.Buckets, store ds.TxnDatastore) *Service {
+func NewService(lib *buckets.Buckets, store kt.TxnDatastoreExtended) *Service {
 	s := &Service{lib: lib}
 	s.queue = q.NewQueue(store, s.handleRequest, s.failRequest)
 	return s
@@ -49,31 +52,11 @@ func (s *Service) Close() error {
 	return s.queue.Close()
 }
 
-// Query represents Pin query parameters.
-type Query struct {
-	// Cid can be used to filter by one or more Pin Cids.
-	Cid []string `form:"cid" json:"cid,omitempty"`
-	// Name can be used to filer by Pin name (by default case-sensitive, exact match).
-	Name string `form:"name" json:"name,omitempty"`
-	// Match can be used to customize the text matching strategy applied when Name is present.
-	Match string `form:"match" json:"match,omitempty"`
-	// Status can be used to filter by Pin status.
-	Status []openapi.Status `form:"status" json:"status,omitempty"`
-	// Before can by used to filter by before creation (queued) time.
-	Before *time.Time `form:"before" json:"before,omitempty"`
-	// After can by used to filter by after creation (queued) time.
-	After *time.Time `form:"after" json:"after,omitempty"`
-	// Limit specifies the max number of Pins to return.
-	Limit *int32 `form:"limit" json:"limit,omitempty"`
-	// Meta can be used to filter results by Pin metadata.
-	Meta *map[string]string `form:"meta" json:"meta,omitempty"`
-}
-
 // ListPins returns a list of openapi.PinStatus matching the Query.
 func (s *Service) ListPins(
 	thread core.ID,
 	key string,
-	query Query,
+	query q.Query,
 	identity did.Token,
 ) ([]openapi.PinStatus, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
@@ -83,21 +66,7 @@ func (s *Service) ListPins(
 		return nil, err
 	}
 
-	var (
-		before, after time.Time
-		limit         int
-	)
-	if query.Before != nil {
-		before = *query.Before
-	}
-	if query.After != nil {
-		after = *query.After
-	}
-	if query.Limit != nil {
-		limit = int(*query.Limit)
-	}
-
-	ids, err := s.queue.ListRequests(key, query.Status, before, after, limit)
+	ids, err := s.queue.ListRequests(key, query)
 	if err != nil {
 		return nil, fmt.Errorf("listing requests: %v", err)
 	}
@@ -131,7 +100,7 @@ func (s *Service) AddPin(
 	}
 
 	status := &openapi.PinStatus{
-		Requestid: s.queue.NewID(),
+		Requestid: q.NewID(),
 		Status:    openapi.QUEUED,
 		Created:   time.Now(),
 		Pin:       pin,
@@ -173,7 +142,14 @@ func (s *Service) AddPin(
 	root = res.Path
 
 	// Enqueue request
-	if err := s.queue.AddRequest(thread, key, root, status, identity); err != nil {
+	if err := s.queue.AddRequest(q.Request{
+		ID:       status.Requestid,
+		Cid:      status.Pin.Cid,
+		Thread:   thread,
+		Key:      key,
+		Root:     root,
+		Identity: identity,
+	}); err != nil {
 		return nil, fmt.Errorf("adding request: %v", err)
 	}
 
@@ -181,7 +157,7 @@ func (s *Service) AddPin(
 	return status, nil
 }
 
-func (s *Service) handleRequest(ctx context.Context, r *q.Request) error {
+func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 	log.Debugf("processing request: %s", r.ID)
 
 	cid, err := c.Decode(r.Cid)
@@ -233,7 +209,7 @@ func (s *Service) handleRequest(ctx context.Context, r *q.Request) error {
 	return nil
 }
 
-func (s *Service) failRequest(ctx context.Context, r *q.Request) error {
+func (s *Service) failRequest(ctx context.Context, r q.Request) error {
 	log.Debugf("failing request: %s", r.ID)
 
 	// Update placeholder with status "failed"
@@ -367,7 +343,14 @@ func (s *Service) ReplacePin(
 	}
 
 	// Re-enqueue request
-	if err := s.queue.AddRequest(thread, key, root, status, identity); err != nil {
+	if err := s.queue.AddRequest(q.Request{
+		ID:       status.Requestid,
+		Cid:      status.Pin.Cid,
+		Thread:   thread,
+		Key:      key,
+		Root:     root,
+		Identity: identity,
+	}); err != nil {
 		return nil, fmt.Errorf("adding request: %v", err)
 	}
 

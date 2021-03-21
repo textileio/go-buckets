@@ -57,11 +57,11 @@ func (m *Manager) Store() *s.Store {
 
 // CreateKey generates and saves a new IPNS key.
 func (m *Manager) CreateKey(ctx context.Context, dbID thread.ID) (keyID string, err error) {
-	key, err := m.keyAPI.Generate(ctx, tutil.MakeToken(), options.Key.Type(options.RSAKey))
+	key, err := m.keyAPI.Generate(ctx, tutil.MakeToken(), options.Key.Type(options.Ed25519Key))
 	if err != nil {
 		return
 	}
-	keyID, err = peer.ToCid(key.ID()).StringOfBase(mbase.Base32)
+	keyID, err = peer.ToCid(key.ID()).StringOfBase(mbase.Base36)
 	if err != nil {
 		return
 	}
