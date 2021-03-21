@@ -11,10 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/textileio/go-buckets/pinning"
-
-	ds "github.com/ipfs/go-datastore"
-	badger "github.com/ipfs/go-ds-badger"
 	httpapi "github.com/ipfs/go-ipfs-http-client"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
@@ -25,9 +21,12 @@ import (
 	dns "github.com/textileio/go-buckets/dns"
 	"github.com/textileio/go-buckets/gateway"
 	ipns "github.com/textileio/go-buckets/ipns"
+	"github.com/textileio/go-buckets/pinning"
+	badger "github.com/textileio/go-ds-badger"
 	mongods "github.com/textileio/go-ds-mongo"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
+	kt "github.com/textileio/go-threads/db/keytransform"
 	nc "github.com/textileio/go-threads/net/api/client"
 	"github.com/textileio/go-threads/util"
 	"google.golang.org/grpc"
@@ -314,7 +313,7 @@ var rootCmd = &cobra.Command{
 		ipfs, err := httpapi.NewApi(ipfsApi)
 		cmd.ErrCheck(err)
 
-		var ipnsms, pss ds.TxnDatastore
+		var ipnsms, pss kt.TxnDatastoreExtended
 		switch datastoreType {
 		case "badger":
 			ipnsms, err = newBadgerStore(filepath.Join(datastoreBadgerRepo, "ipns"))
@@ -426,13 +425,13 @@ func getClientRPCOpts(target string) (opts []grpc.DialOption) {
 	return opts
 }
 
-func newBadgerStore(repo string) (ds.TxnDatastore, error) {
+func newBadgerStore(repo string) (kt.TxnDatastoreExtended, error) {
 	if err := os.MkdirAll(repo, os.ModePerm); err != nil {
 		return nil, err
 	}
 	return badger.NewDatastore(repo, &badger.DefaultOptions)
 }
 
-func newMongoStore(ctx context.Context, uri, db, collection string) (ds.TxnDatastore, error) {
+func newMongoStore(ctx context.Context, uri, db, collection string) (kt.TxnDatastoreExtended, error) {
 	return mongods.New(ctx, uri, db, mongods.WithCollName(collection))
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/textileio/go-buckets/pinning"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
+	"github.com/textileio/go-buckets/pinning/queue"
 )
 
 func (g *Gateway) listPins(c *gin.Context) {
@@ -21,13 +22,13 @@ func (g *Gateway) listPins(c *gin.Context) {
 		return
 	}
 
-	var query pinning.Query
+	var query openapi.Query
 	if err := c.ShouldBindQuery(&query); err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
 
-	pins, err := g.ps.ListPins(thread, key, query, identity)
+	pins, err := g.ps.ListPins(thread, key, oapiQueryToQuery(query), identity)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
@@ -38,6 +39,36 @@ func (g *Gateway) listPins(c *gin.Context) {
 		Results: pins,
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+func oapiQueryToQuery(q openapi.Query) queue.Query {
+	var (
+		before, after string
+		limit         int
+		meta          map[string]string
+	)
+	if q.Before != nil {
+		before = queue.NewIDFromTime(*q.Before)
+	}
+	if q.After != nil {
+		after = queue.NewIDFromTime(*q.After)
+	}
+	if q.Limit != nil {
+		limit = int(*q.Limit)
+	}
+	if q.Meta != nil {
+		meta = *q.Meta
+	}
+	return queue.Query{
+		Cid:    q.Cid,
+		Name:   q.Name,
+		Match:  q.Match,
+		Status: q.Status,
+		Before: before,
+		After:  after,
+		Limit:  limit,
+		Meta:   meta,
+	}
 }
 
 func (g *Gateway) addPin(c *gin.Context) {
