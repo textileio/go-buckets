@@ -2,6 +2,7 @@ package queue
 
 // @todo: Don't save entire request in status queues
 // @todo: Add doc strings
+// @todo: Use badger v2
 
 import (
 	"bytes"
@@ -167,15 +168,17 @@ func (q *Queue) ListRequests(key string, query Query) ([]string, error) {
 		}
 
 		var (
-			seek  string
-			limit = query.Limit
+			seek, seekKey string
+			limit         = query.Limit
 		)
 		if len(query.Before) != 0 {
-			seek = getStatusKey(pre, key, query.Before).String()
-			limit++
+			seek = query.Before
 		} else if len(query.After) != 0 {
-			seek = getStatusKey(pre, key, query.After).String()
-			limit++
+			seek = query.After
+		}
+		if len(seek) != 0 {
+			seekKey = getStatusKey(pre, key, seek).String()
+			limit++ // Bump limit in case seek matches an element
 		}
 
 		results, err := q.store.QueryExtended(dsextensions.QueryExt{
@@ -185,7 +188,7 @@ func (q *Queue) ListRequests(key string, query Query) ([]string, error) {
 				Limit:    limit,
 				KeysOnly: true,
 			},
-			SeekPrefix: seek,
+			SeekPrefix: seekKey,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("querying requests: %v", err)
@@ -201,8 +204,12 @@ func (q *Queue) ListRequests(key string, query Query) ([]string, error) {
 		results.Close()
 
 		if len(seek) != 0 && len(reqs) > 0 {
-			// Remove seek (first) element
-			reqs = reqs[1:]
+			// Remove seek from tip if it matches the first record
+			if seek == reqs[0] {
+				reqs = reqs[1:]
+			} else if len(reqs) == limit { // All elements are valid, remove the extra element
+				reqs = reqs[:len(reqs)-1]
+			}
 		}
 
 		all = append(all, reqs...)
@@ -215,14 +222,16 @@ func (q *Queue) ListRequests(key string, query Query) ([]string, error) {
 			sort.Slice(all, func(i, j int) bool {
 				return all[i] > all[j]
 			})
+			if len(all) > query.Limit {
+				all = all[len(all)-query.Limit:]
+			}
 		default:
 			sort.Slice(all, func(i, j int) bool {
 				return all[i] < all[j]
 			})
-		}
-
-		if len(all) > query.Limit {
-			all = all[:query.Limit]
+			if len(all) > query.Limit {
+				all = all[:query.Limit]
+			}
 		}
 	}
 

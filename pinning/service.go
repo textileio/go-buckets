@@ -1,8 +1,9 @@
 package pinning
 
-// @todo: Handle remaining query types
+// @todo: Clean up root usage
 // @todo: Add delegates field to responses
 // @todo: Leverage origins when setting path
+// @todo: Handle remaining query types
 
 import (
 	"context"
