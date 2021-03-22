@@ -86,7 +86,7 @@ func (g *Gateway) renderIPFSPath(c *gin.Context, base, pth string) {
 	}
 	defer f.Close()
 
-	ct, r, err := detectReaderContentType(f)
+	ct, r, err := detectReaderOrPathContentType(f, pth)
 	if err != nil {
 		renderError(c, http.StatusInternalServerError, fmt.Errorf("detecting mime: %s", err))
 		return
@@ -118,6 +118,7 @@ func (g *Gateway) ipnsHandler(c *gin.Context) {
 }
 
 func (g *Gateway) renderIPNSKey(c *gin.Context, key, pth string) {
+	// @todo: Lookup key and render from local content if exists
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
 	root, err := g.ipfs.Name().Resolve(ctx, key)

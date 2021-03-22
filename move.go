@@ -37,7 +37,7 @@ func (t *Txn) MovePath(
 		return 0, nil, err
 	}
 	if fpth == "" {
-		// @todo: enable move of root directory
+		// @todo: Enable move of root directory
 		return 0, nil, fmt.Errorf("root cannot be moved")
 	}
 	tpth, err = parsePath(tpth)

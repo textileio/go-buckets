@@ -16,35 +16,24 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// bucketHandler handles bucket requests.
 func (g *Gateway) bucketHandler(c *gin.Context) {
-	g.renderBucket(c, c.Param("key"), c.Param("path"))
+	thread, err := g.getThread(c)
+	if err != nil {
+		renderError(c, http.StatusBadRequest, err)
+		return
+	}
+	g.renderBucket(c, thread, c.Param("key"), c.Param("path"))
 }
 
-// renderInstance renders a bucket instance in a collection.
-func (g *Gateway) renderBucket(c *gin.Context, id, pth string) {
+// renderBucket renders a bucket instance in a collection.
+func (g *Gateway) renderBucket(c *gin.Context, thread core.ID, key, pth string) {
 	pth = strings.TrimPrefix(pth, "/")
 	token := did.Token(c.Query("token"))
 
-	ipnskey, err := g.ipns.Store().GetByCid(id)
-	if err != nil {
-		render404(c)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	g.renderBucketPath(c, ctx, ipnskey.ThreadID, id, pth, token)
-}
-
-func (g *Gateway) renderBucketPath(
-	c *gin.Context,
-	ctx context.Context,
-	thread core.ID,
-	id,
-	pth string,
-	token did.Token,
-) {
-	rep, buck, err := g.lib.ListPath(ctx, thread, id, token, pth)
+	rep, buck, err := g.lib.ListPath(ctx, thread, key, token, pth)
 	if err != nil {
 		render404(c)
 		return
@@ -57,7 +46,7 @@ func (g *Gateway) renderBucketPath(
 		}
 		defer r.Close()
 
-		ct, mr, err := detectReaderContentType(r)
+		ct, mr, err := detectReaderOrPathContentType(r, pth)
 		if err != nil {
 			renderError(c, http.StatusInternalServerError, fmt.Errorf("detecting content-type: %v", err))
 			return

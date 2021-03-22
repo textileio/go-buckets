@@ -1,6 +1,5 @@
 package queue
 
-// @todo: Don't save entire request in status queues
 // @todo: Add doc strings
 // @todo: Use badger v2
 
@@ -84,14 +83,14 @@ type Status struct {
 }
 
 type Query struct {
-	Cid    []string                     // todo
-	Name   string                       // todo
-	Match  openapi.TextMatchingStrategy // todo
+	Cid    []string                     // @todo
+	Name   string                       // @todo
+	Match  openapi.TextMatchingStrategy // @todo
 	Status []openapi.Status
 	Before string // ulid.ULID string
 	After  string // ulid.ULID string
 	Limit  int
-	Meta   map[string]string // todo
+	Meta   map[string]string // @todo
 }
 
 func (q Query) setDefaults() Query {

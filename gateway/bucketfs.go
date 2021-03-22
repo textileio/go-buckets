@@ -108,7 +108,7 @@ func (f *bucketFS) Write(c *gin.Context, ctx context.Context, thread core.ID, ke
 	}
 	defer r.Close()
 
-	ct, mr, err := detectReaderContentType(r)
+	ct, mr, err := detectReaderOrPathContentType(r, pth)
 	if err != nil {
 		return fmt.Errorf("detecting content-type: %v", err)
 	}
@@ -144,7 +144,7 @@ func (g *Gateway) renderWWWBucket(c *gin.Context, key string) {
 				return
 			}
 
-			ct, mr, err := detectReaderContentType(r)
+			ct, mr, err := detectReaderOrPathContentType(r, item.Name)
 			if err != nil {
 				renderError(c, http.StatusInternalServerError, fmt.Errorf("detecting content-type: %v", err))
 				return

@@ -1,5 +1,8 @@
 package gateway
 
+// @todo: Get root from path
+// @todo: Use form field to set push path
+
 import (
 	"context"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/go-buckets"
+	core "github.com/textileio/go-threads/core/thread"
 )
 
 var UploadTimeout = time.Hour
@@ -39,23 +43,25 @@ type PushPathsResults struct {
 	Bucket  *buckets.Bucket   `json:"bucket"`
 }
 
-func (g *Gateway) pushPaths(c *gin.Context) {
-	thread, key, err := g.getThreadAndKey(c)
+func (g *Gateway) bucketPushPathsHandler(c *gin.Context) {
+	thread, err := g.getThread(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
 			Error: err.Error(),
 		})
 		return
 	}
-	identity, ok := getIdentity(c)
+	g.pushBucketPaths(c, thread, c.Param("key"))
+}
+
+func (g *Gateway) pushBucketPaths(c *gin.Context, thread core.ID, key string) {
+	token, ok := getAuth(c)
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, PostError{
 			Error: fmt.Sprintf("authorization required"),
 		})
 		return
 	}
-
-	// @todo: get root from path
 	var root path.Resolved
 
 	_, params, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
@@ -75,7 +81,7 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), UploadTimeout)
 	defer cancel()
-	in, out, errs := g.lib.PushPaths(ctx, thread, key, identity, root)
+	in, out, errs := g.lib.PushPaths(ctx, thread, key, token, root)
 	if len(errs) != 0 {
 		err := <-errs
 		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
