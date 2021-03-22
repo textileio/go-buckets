@@ -10,13 +10,17 @@ import (
 	"github.com/textileio/go-buckets/pinning/queue"
 )
 
-func (g *Gateway) listPins(c *gin.Context) {
-	thread, key, err := g.getThreadAndKey(c)
+func (g *Gateway) listPinsHandler(c *gin.Context) {
+	g.listPins(c, c.Param("key"))
+}
+
+func (g *Gateway) listPins(c *gin.Context, key string) {
+	thread, err := g.getThread(c)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
-	identity, ok := getIdentity(c)
+	token, ok := getAuth(c)
 	if !ok {
 		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))
 		return
@@ -28,7 +32,7 @@ func (g *Gateway) listPins(c *gin.Context) {
 		return
 	}
 
-	pins, err := g.ps.ListPins(thread, key, oapiQueryToQuery(query), identity)
+	pins, err := g.ps.ListPins(thread, key, oapiQueryToQuery(query), token)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
@@ -71,13 +75,17 @@ func oapiQueryToQuery(q openapi.Query) queue.Query {
 	}
 }
 
-func (g *Gateway) addPin(c *gin.Context) {
-	thread, key, err := g.getThreadAndKey(c)
+func (g *Gateway) addPinHandler(c *gin.Context) {
+	g.addPin(c, c.Param("key"))
+}
+
+func (g *Gateway) addPin(c *gin.Context, key string) {
+	thread, err := g.getThread(c)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
-	identity, ok := getIdentity(c)
+	token, ok := getAuth(c)
 	if !ok {
 		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))
 		return
@@ -89,7 +97,7 @@ func (g *Gateway) addPin(c *gin.Context) {
 		return
 	}
 
-	status, err := g.ps.AddPin(thread, key, pin, identity)
+	status, err := g.ps.AddPin(thread, key, pin, token)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
@@ -98,20 +106,23 @@ func (g *Gateway) addPin(c *gin.Context) {
 	c.JSON(http.StatusAccepted, status)
 }
 
-func (g *Gateway) getPin(c *gin.Context) {
-	thread, key, err := g.getThreadAndKey(c)
+func (g *Gateway) getPinHandler(c *gin.Context) {
+	g.getPin(c, c.Param("key"), c.Param("requestid"))
+}
+
+func (g *Gateway) getPin(c *gin.Context, key, id string) {
+	thread, err := g.getThread(c)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
-	identity, ok := getIdentity(c)
+	token, ok := getAuth(c)
 	if !ok {
 		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))
 		return
 	}
-	id := c.Param("requestid")
 
-	status, err := g.ps.GetPin(thread, key, id, identity)
+	status, err := g.ps.GetPin(thread, key, id, token)
 	if errors.Is(pinning.ErrPinNotFound, err) {
 		newFailure(c, http.StatusNotFound, err)
 		return
@@ -123,18 +134,21 @@ func (g *Gateway) getPin(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-func (g *Gateway) replacePin(c *gin.Context) {
-	thread, key, err := g.getThreadAndKey(c)
+func (g *Gateway) replacePinHandler(c *gin.Context) {
+	g.replacePin(c, c.Param("key"), c.Param("requestid"))
+}
+
+func (g *Gateway) replacePin(c *gin.Context, key, id string) {
+	thread, err := g.getThread(c)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
-	identity, ok := getIdentity(c)
+	token, ok := getAuth(c)
 	if !ok {
 		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))
 		return
 	}
-	id := c.Param("requestid")
 
 	var pin openapi.Pin
 	if err := c.ShouldBind(&pin); err != nil {
@@ -142,7 +156,7 @@ func (g *Gateway) replacePin(c *gin.Context) {
 		return
 	}
 
-	status, err := g.ps.ReplacePin(thread, key, id, pin, identity)
+	status, err := g.ps.ReplacePin(thread, key, id, pin, token)
 	if errors.Is(pinning.ErrPinNotFound, err) {
 		newFailure(c, http.StatusNotFound, err)
 		return
@@ -154,20 +168,23 @@ func (g *Gateway) replacePin(c *gin.Context) {
 	c.JSON(http.StatusAccepted, status)
 }
 
-func (g *Gateway) removePin(c *gin.Context) {
-	thread, key, err := g.getThreadAndKey(c)
+func (g *Gateway) removePinHandler(c *gin.Context) {
+	g.removePin(c, c.Param("key"), c.Param("requestid"))
+}
+
+func (g *Gateway) removePin(c *gin.Context, key, id string) {
+	thread, err := g.getThread(c)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
 	}
-	identity, ok := getIdentity(c)
+	token, ok := getAuth(c)
 	if !ok {
 		newFailure(c, http.StatusBadRequest, errors.New("authorization required"))
 		return
 	}
-	id := c.Param("requestid")
 
-	if err := g.ps.RemovePin(thread, key, id, identity); errors.Is(pinning.ErrPinNotFound, err) {
+	if err := g.ps.RemovePin(thread, key, id, token); errors.Is(pinning.ErrPinNotFound, err) {
 		newFailure(c, http.StatusNotFound, err)
 		return
 	} else if err != nil {

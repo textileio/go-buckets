@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,28 +115,38 @@ func (g *Gateway) Start() {
 		c.Writer.WriteHeader(http.StatusNoContent)
 	})
 
+	// IPFS
 	router.GET("/ipfs/:root", g.subdomainOptionHandler, g.ipfsHandler)
 	router.GET("/ipfs/:root/*path", g.subdomainOptionHandler, g.ipfsHandler)
 
+	// IPNS
 	router.GET("/ipns/:key", g.subdomainOptionHandler, g.ipnsHandler)
 	router.GET("/ipns/:key/*path", g.subdomainOptionHandler, g.ipnsHandler)
 
+	// P2P
 	router.GET("/p2p/:key", g.subdomainOptionHandler, g.p2pHandler)
 
+	// IPLD
 	router.GET("/ipld/:root", g.subdomainOptionHandler, g.ipldHandler)
 	router.GET("/ipld/:root/*path", g.subdomainOptionHandler, g.ipldHandler)
 
-	router.POST("/thread/:id", g.subdomainOptionHandler, g.threadHandler)
+	// Buckets
+	router.GET("/thread/:thread/buckets", g.subdomainOptionHandler, g.threadHandler)
+	router.POST("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.bucketPushPathsHandler)
+	router.GET("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.bucketHandler)
+	router.GET("/thread/:thread/buckets/:key/*path", g.subdomainOptionHandler, g.bucketHandler)
 
-	router.POST("/buckets/:key", g.subdomainOptionHandler, g.pushPaths)
-	router.GET("/buckets/:key", g.subdomainOptionHandler, g.bucketHandler)
-	router.GET("/buckets/:key/*path", g.subdomainOptionHandler, g.bucketHandler)
+	// Buckets shorthand
+	router.POST("/b/:key", g.bucketPushPathsHandler)
+	router.GET("/b/:key", g.bucketHandler)
+	router.GET("/b/:key/*path", g.bucketHandler)
 
-	router.GET("/service/:key/pins", g.subdomainOptionHandler, g.listPins)
-	router.POST("/service/:key/pins", g.subdomainOptionHandler, g.addPin)
-	router.GET("/service/:key/pins/:requestid", g.subdomainOptionHandler, g.getPin)
-	router.POST("/service/:key/pins/:requestid", g.subdomainOptionHandler, g.replacePin)
-	router.DELETE("/service/:key/pins/:requestid", g.subdomainOptionHandler, g.removePin)
+	// Buckets Pinning Service
+	router.GET("/bps/:key/pins", g.subdomainOptionHandler, g.listPinsHandler)
+	router.POST("/bps/:key/pins", g.subdomainOptionHandler, g.addPinHandler)
+	router.GET("/bps/:key/pins/:requestid", g.subdomainOptionHandler, g.getPinHandler)
+	router.POST("/bps/:key/pins/:requestid", g.subdomainOptionHandler, g.replacePinHandler)
+	router.DELETE("/bps/:key/pins/:requestid", g.subdomainOptionHandler, g.removePinHandler)
 
 	router.NoRoute(g.subdomainHandler)
 
@@ -167,7 +178,7 @@ func (g *Gateway) Close() error {
 }
 
 // dashboardHandler renders a dev or org dashboard.
-// @todo: Use this
+// @todo: Use or remove dashboard handler
 func (g *Gateway) dashboardHandler(c *gin.Context) {
 	render404(c)
 }
@@ -192,18 +203,25 @@ func formatError(err error) string {
 	return strings.Join(words, " ") + "."
 }
 
-// getThreadAndKey returns core.ID and bucket key from request params.
-func (g *Gateway) getThreadAndKey(c *gin.Context) (core.ID, string, error) {
-	key := c.Param("key")
-	ipnskey, err := g.ipns.Store().GetByCid(key)
-	if err != nil {
-		return "", "", fmt.Errorf("looking up thread: %v", err)
+// getThread returns core.ID from request params or the IPNS key store.
+func (g *Gateway) getThread(c *gin.Context) (core.ID, error) {
+	threadp := c.Param("thread")
+	if len(threadp) != 0 {
+		thread, err := core.Decode(threadp)
+		if err != nil {
+			return "", errors.New("invalid thread ID")
+		}
+		return thread, nil
 	}
-	return ipnskey.ThreadID, key, nil
+	ipnskey, err := g.ipns.Store().GetByCid(c.Param("key"))
+	if err != nil {
+		return "", fmt.Errorf("looking up thread: %v", err)
+	}
+	return ipnskey.ThreadID, nil
 }
 
-// getIdentity returns did.Token from request params.
-func getIdentity(c *gin.Context) (did.Token, bool) {
+// getAuth returns did.Token from the authorization header.
+func getAuth(c *gin.Context) (did.Token, bool) {
 	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
 	if len(auth) < 2 {
 		return "", false
@@ -266,11 +284,49 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 			renderError(c, http.StatusBadRequest, errors.New("invalid thread ID"))
 			return
 		}
-		g.renderThread(c, thread)
-	case "buckets":
-		g.renderBucket(c, key, c.Request.URL.Path)
-	case "pins":
-		// @todo
+		parts := strings.SplitN(strings.TrimSuffix(c.Request.URL.Path, "/"), "/", 4)
+		if len(parts) < 2 || parts[1] != "buckets" {
+			render404(c)
+			return
+		}
+		switch len(parts) {
+		case 2:
+			g.renderThread(c, thread)
+		case 3:
+			if c.Request.Method == "POST" {
+				g.pushBucketPaths(c, thread, parts[2])
+			} else {
+				g.renderBucket(c, thread, parts[2], "")
+			}
+		case 4:
+			g.renderBucket(c, thread, parts[2], parts[3])
+		default:
+			render404(c)
+		}
+	case "bps":
+		parts := strings.SplitN(strings.TrimSuffix(c.Request.URL.Path, "/"), "/", 3)
+		if len(parts) < 2 || parts[1] != "pins" {
+			render404(c)
+			return
+		}
+		switch len(parts) {
+		case 2:
+			if c.Request.Method == "POST" {
+				g.addPin(c, key)
+			} else {
+				g.listPins(c, key)
+			}
+		case 3:
+			if c.Request.Method == "POST" {
+				g.replacePin(c, key, parts[2])
+			} else if c.Request.Method == "DELETE" {
+				g.removePin(c, key, parts[2])
+			} else {
+				g.getPin(c, key, parts[2])
+			}
+		default:
+			render404(c)
+		}
 	default:
 		render404(c)
 	}
@@ -280,7 +336,7 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 // https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L251
 func isSubdomainNamespace(ns string) bool {
 	switch ns {
-	case "ipfs", "ipns", "p2p", "ipld", "thread", "buckets", "pins":
+	case "ipfs", "ipns", "p2p", "ipld", "thread", "bps":
 		return true
 	default:
 		return false
@@ -376,14 +432,26 @@ func (g *Gateway) toSubdomainURL(r *http.Request) (redirURL string, ok bool) {
 	return safeRedirectURL(fmt.Sprintf("%s://%s.%s.%s/%s%s", scheme, rootID, ns, host, rest, query))
 }
 
-func detectReaderContentType(r io.Reader) (string, io.Reader, error) {
+// detectReaderOrPathContentType detects the best available mime type for a reader,
+// considering file extensions. http.DetectContentType does not properly detect content-type
+// for web assets: htm, html, css, and js.
+func detectReaderOrPathContentType(r io.Reader, pth string) (string, io.Reader, error) {
 	var buf [512]byte
 	n, err := io.ReadAtLeast(r, buf[:], len(buf))
 	if err != nil && err != io.ErrUnexpectedEOF {
 		return "", nil, fmt.Errorf("reading reader: %s", err)
 	}
-	contentType := http.DetectContentType(buf[:])
-	return contentType, io.MultiReader(bytes.NewReader(buf[:n]), r), nil
+	reader := io.MultiReader(bytes.NewReader(buf[:n]), r)
+	switch filepath.Ext(pth) {
+	case ".htm", ".html":
+		return "text/html", reader, nil
+	case ".css":
+		return "text/css", reader, nil
+	case ".js":
+		return "application/javascript", reader, nil
+	default:
+		return http.DetectContentType(buf[:]), reader, nil
+	}
 }
 
 // byteCountDecimal returns a human readable byte size.

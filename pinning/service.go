@@ -3,7 +3,6 @@ package pinning
 // @todo: Add delegates field to responses
 // @todo: Leverage origins when setting path
 // @todo: Handle remaining query types
-// @todo: Cleanup up embedded queue when bucket is mutated out-of-band?
 
 import (
 	"context"

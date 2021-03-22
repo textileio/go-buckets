@@ -14,7 +14,7 @@ import (
 
 // threadHandler handles thread requests.
 func (g *Gateway) threadHandler(c *gin.Context) {
-	thread, err := core.Decode(c.Param("id"))
+	thread, err := core.Decode(c.Param("thread"))
 	if err != nil {
 		renderError(c, http.StatusBadRequest, errors.New("invalid thread ID"))
 		return
@@ -28,10 +28,6 @@ func (g *Gateway) renderThread(c *gin.Context, thread core.ID) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	g.renderThreadBuckets(c, ctx, thread, token)
-}
-
-func (g *Gateway) renderThreadBuckets(c *gin.Context, ctx context.Context, thread core.ID, token did.Token) {
 	rep, err := g.lib.List(ctx, thread, token)
 	if err != nil {
 		render404(c)
