@@ -18,14 +18,20 @@ func (b *Buckets) MovePath(
 	ctx context.Context,
 	thread core.ID,
 	key string,
+	identity did.Token,
 	root path.Resolved,
 	fpth, tpth string,
-	identity did.Token,
 ) (int64, *Bucket, error) {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
-	defer lk.Release()
+	txn := b.NewTxn(thread, key, identity)
+	defer txn.Close()
+	return txn.MovePath(ctx, root, fpth, tpth)
+}
 
+func (t *Txn) MovePath(
+	ctx context.Context,
+	root path.Resolved,
+	fpth, tpth string,
+) (int64, *Bucket, error) {
 	fpth, err := parsePath(fpth)
 	if err != nil {
 		return 0, nil, err
@@ -43,7 +49,7 @@ func (b *Buckets) MovePath(
 		return 0, nil, fmt.Errorf("path is destination")
 	}
 
-	instance, pth, err := b.getBucketAndPath(ctx, thread, key, fpth, identity)
+	instance, pth, err := t.b.getBucketAndPath(ctx, t.thread, t.key, t.identity, fpth)
 	if err != nil {
 		return 0, nil, fmt.Errorf("getting path: %v", err)
 	}
@@ -56,7 +62,7 @@ func (b *Buckets) MovePath(
 		UpdatedAt: instance.UpdatedAt,
 	})
 	instance.UnsetMetadataWithPrefix(fpth + "/")
-	if err := b.c.Verify(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+	if err := t.b.c.Verify(ctx, t.thread, instance, collection.WithIdentity(t.identity)); err != nil {
 		return 0, nil, fmt.Errorf("verifying bucket update: %v", err)
 	}
 
@@ -64,7 +70,7 @@ func (b *Buckets) MovePath(
 	if err != nil {
 		return 0, nil, err
 	}
-	fitem, err := b.pathToItem(ctx, instance, fbpth, false)
+	fitem, err := t.b.pathToItem(ctx, instance, fbpth, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -72,7 +78,7 @@ func (b *Buckets) MovePath(
 	if err != nil {
 		return 0, nil, err
 	}
-	titem, err := b.pathToItem(ctx, instance, tbpth, false)
+	titem, err := t.b.pathToItem(ctx, instance, tbpth, false)
 	if err == nil {
 		if fitem.IsDir && !titem.IsDir {
 			return 0, nil, fmt.Errorf("destination is not a directory")
@@ -85,19 +91,19 @@ func (b *Buckets) MovePath(
 		}
 	}
 
-	pnode, err := dag.GetNodeAtPath(ctx, b.ipfs, pth, instance.GetLinkEncryptionKey())
+	pnode, err := dag.GetNodeAtPath(ctx, t.b.ipfs, pth, instance.GetLinkEncryptionKey())
 	if err != nil {
 		return 0, nil, fmt.Errorf("getting node: %v", err)
 	}
 
 	var dirPath path.Resolved
 	if instance.IsPrivate() {
-		ctx, dirPath, err = dag.CopyDag(ctx, b.ipfs, instance, pnode, fpth, tpth)
+		ctx, dirPath, err = dag.CopyDag(ctx, t.b.ipfs, instance, pnode, fpth, tpth)
 		if err != nil {
 			return 0, nil, fmt.Errorf("copying node: %v", err)
 		}
 	} else {
-		ctx, dirPath, err = b.setPathFromExistingCid(
+		ctx, dirPath, err = t.b.setPathFromExistingCid(
 			ctx,
 			instance,
 			path.New(instance.Path),
@@ -115,25 +121,25 @@ func (b *Buckets) MovePath(
 	// If "a/b" => "a/", cleanup only needed for priv
 	if strings.HasPrefix(fpth, tpth) {
 		if instance.IsPrivate() {
-			ctx, dirPath, err = b.removePath(ctx, instance, fpth)
+			ctx, dirPath, err = t.b.removePath(ctx, instance, fpth)
 			if err != nil {
 				return 0, nil, fmt.Errorf("removing path: %v", err)
 			}
 			instance.Path = dirPath.String()
 		}
 
-		if err := b.saveAndPublish(ctx, thread, instance, identity); err != nil {
+		if err := t.b.saveAndPublish(ctx, t.thread, t.identity, instance); err != nil {
 			return 0, nil, err
 		}
 
 		log.Debugf("moved %s to %s", fpth, tpth)
-		return dag.GetPinnedBytes(ctx), instanceToBucket(thread, instance), nil
+		return dag.GetPinnedBytes(ctx), instanceToBucket(t.thread, instance), nil
 	}
 
 	if strings.HasPrefix(tpth, fpth) {
 		// If "a/" => "a/b" cleanup each leaf in "a" that isn't "b" (skipping .textileseed)
 		ppth := path.Join(path.New(instance.Path), fpth)
-		item, err := b.listPath(ctx, instance, ppth)
+		item, err := t.b.listPath(ctx, instance, ppth)
 		if err != nil {
 			return 0, nil, fmt.Errorf("listing path: %v", err)
 		}
@@ -142,7 +148,7 @@ func (b *Buckets) MovePath(
 			if strings.Compare(chld.Name, collection.SeedName) == 0 || sp == tpth {
 				continue
 			}
-			ctx, dirPath, err = b.removePath(ctx, instance, trimSlash(sp))
+			ctx, dirPath, err = t.b.removePath(ctx, instance, trimSlash(sp))
 			if err != nil {
 				return 0, nil, fmt.Errorf("removing path: %v", err)
 			}
@@ -150,17 +156,17 @@ func (b *Buckets) MovePath(
 		}
 	} else {
 		// if a/ => b/ remove a
-		ctx, dirPath, err = b.removePath(ctx, instance, fpth)
+		ctx, dirPath, err = t.b.removePath(ctx, instance, fpth)
 		if err != nil {
 			return 0, nil, fmt.Errorf("removing path: %v", err)
 		}
 		instance.Path = dirPath.String()
 	}
 
-	if err := b.saveAndPublish(ctx, thread, instance, identity); err != nil {
+	if err := t.b.saveAndPublish(ctx, t.thread, t.identity, instance); err != nil {
 		return 0, nil, err
 	}
 
 	log.Debugf("moved %s to %s", fpth, tpth)
-	return dag.GetPinnedBytes(ctx), instanceToBucket(thread, instance), nil
+	return dag.GetPinnedBytes(ctx), instanceToBucket(t.thread, instance), nil
 }

@@ -11,11 +11,12 @@ import (
 func (b *Buckets) ListPath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (*PathItem, *Bucket, error) {
 	pth = trimSlash(pth)
-	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, pth, identity)
+	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, identity, pth)
 	if err != nil {
 		return nil, nil, err
 	}

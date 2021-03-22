@@ -164,8 +164,9 @@ func (b *Buckets) removePath(
 func (b *Buckets) getBucketAndPath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (*collection.Bucket, path.Path, error) {
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {

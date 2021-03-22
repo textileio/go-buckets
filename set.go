@@ -16,17 +16,25 @@ func (b *Buckets) SetPath(
 	ctx context.Context,
 	thread core.ID,
 	key string,
+	identity did.Token,
 	root path.Resolved,
 	pth string,
 	cid c.Cid,
 	meta map[string]interface{},
-	identity did.Token,
 ) (int64, *Bucket, error) {
-	lck := b.locks.Get(lock(key))
-	lck.Acquire()
-	defer lck.Release()
+	txn := b.NewTxn(thread, key, identity)
+	defer txn.Close()
+	return txn.SetPath(ctx, root, pth, cid, meta)
+}
 
-	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+func (t *Txn) SetPath(
+	ctx context.Context,
+	root path.Resolved,
+	pth string,
+	cid c.Cid,
+	meta map[string]interface{},
+) (int64, *Bucket, error) {
+	instance, err := t.b.c.GetSafe(ctx, t.thread, t.key, collection.WithIdentity(t.identity))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -42,7 +50,7 @@ func (b *Buckets) SetPath(
 	})
 	instance.UnsetMetadataWithPrefix(pth + "/")
 
-	if err := b.c.Verify(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+	if err := t.b.c.Verify(ctx, t.thread, instance, collection.WithIdentity(t.identity)); err != nil {
 		return 0, nil, err
 	}
 
@@ -57,15 +65,15 @@ func (b *Buckets) SetPath(
 	}
 
 	buckPath := path.New(instance.Path)
-	ctx, dirPath, err := b.setPathFromExistingCid(ctx, instance, buckPath, pth, cid, linkKey, fileKey)
+	ctx, dirPath, err := t.b.setPathFromExistingCid(ctx, instance, buckPath, pth, cid, linkKey, fileKey)
 	if err != nil {
 		return 0, nil, err
 	}
 	instance.Path = dirPath.String()
-	if err := b.c.Save(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+	if err := t.b.c.Save(ctx, t.thread, instance, collection.WithIdentity(t.identity)); err != nil {
 		return 0, nil, err
 	}
 
 	log.Debugf("set %s to %s", pth, cid)
-	return dag.GetPinnedBytes(ctx), instanceToBucket(thread, instance), nil
+	return dag.GetPinnedBytes(ctx), instanceToBucket(t.thread, instance), nil
 }

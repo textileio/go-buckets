@@ -15,21 +15,28 @@ func (b *Buckets) PushPathInfo(
 	ctx context.Context,
 	thread core.ID,
 	key string,
+	identity did.Token,
 	root path.Resolved,
 	pth string,
 	info map[string]interface{},
-	identity did.Token,
 ) (*Bucket, error) {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
-	defer lk.Release()
+	txn := b.NewTxn(thread, key, identity)
+	defer txn.Close()
+	return txn.PushPathInfo(ctx, root, pth, info)
+}
 
+func (t *Txn) PushPathInfo(
+	ctx context.Context,
+	root path.Resolved,
+	pth string,
+	info map[string]interface{},
+) (*Bucket, error) {
 	pth, err := parsePath(pth)
 	if err != nil {
 		return nil, err
 	}
 
-	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+	instance, err := t.b.c.GetSafe(ctx, t.thread, t.key, collection.WithIdentity(t.identity))
 	if err != nil {
 		return nil, err
 	}
@@ -65,20 +72,21 @@ func (b *Buckets) PushPathInfo(
 		instance.UpdatedAt = time.Now().UnixNano()
 		target.UpdatedAt = instance.UpdatedAt
 		instance.Metadata[pth] = target
-		if err := b.c.Save(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+		if err := t.b.c.Save(ctx, t.thread, instance, collection.WithIdentity(t.identity)); err != nil {
 			return nil, err
 		}
 	}
 
-	log.Debugf("pushed info for %s in %s", pth, key)
-	return instanceToBucket(thread, instance), nil
+	log.Debugf("pushed info for %s in %s", pth, t.key)
+	return instanceToBucket(t.thread, instance), nil
 }
 
 func (b *Buckets) PullPathInfo(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (map[string]interface{}, error) {
 	pth, err := parsePath(pth)
 	if err != nil {

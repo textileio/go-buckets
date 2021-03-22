@@ -75,7 +75,7 @@ func (g *Gateway) pushPaths(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), UploadTimeout)
 	defer cancel()
-	in, out, errs := g.lib.PushPaths(ctx, thread, key, root, identity)
+	in, out, errs := g.lib.PushPaths(ctx, thread, key, identity, root)
 	if len(errs) != 0 {
 		err := <-errs
 		c.AbortWithStatusJSON(http.StatusBadRequest, PostError{

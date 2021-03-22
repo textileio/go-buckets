@@ -18,21 +18,28 @@ func (b *Buckets) PushPathAccessRoles(
 	ctx context.Context,
 	thread core.ID,
 	key string,
+	identity did.Token,
 	root path.Resolved,
 	pth string,
 	roles map[did.DID]collection.Role,
-	identity did.Token,
 ) (int64, *Bucket, error) {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
-	defer lk.Release()
+	txn := b.NewTxn(thread, key, identity)
+	defer txn.Close()
+	return txn.PushPathAccessRoles(ctx, root, pth, roles)
+}
 
+func (t *Txn) PushPathAccessRoles(
+	ctx context.Context,
+	root path.Resolved,
+	pth string,
+	roles map[did.DID]collection.Role,
+) (int64, *Bucket, error) {
 	pth, err := parsePath(pth)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, pth, identity)
+	instance, bpth, err := t.b.getBucketAndPath(ctx, t.thread, t.key, t.identity, pth)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -41,7 +48,7 @@ func (b *Buckets) PushPathAccessRoles(
 	}
 
 	linkKey := instance.GetLinkEncryptionKey()
-	pathNode, err := dag.GetNodeAtPath(ctx, b.ipfs, bpth, linkKey)
+	pathNode, err := dag.GetNodeAtPath(ctx, t.b.ipfs, bpth, linkKey)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -92,7 +99,7 @@ func (b *Buckets) PushPathAccessRoles(
 				return 0, nil, err
 			}
 		}
-		if err := b.c.Verify(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+		if err := t.b.c.Verify(ctx, t.thread, instance, collection.WithIdentity(t.identity)); err != nil {
 			return 0, nil, err
 		}
 
@@ -103,7 +110,7 @@ func (b *Buckets) PushPathAccessRoles(
 			}
 			nmap, err := dag.EncryptDag(
 				ctx,
-				b.ipfs,
+				t.b.ipfs,
 				pathNode,
 				pth,
 				linkKey,
@@ -123,31 +130,32 @@ func (b *Buckets) PushPathAccessRoles(
 			}
 			pn := nmap[pathNode.Cid()].Node
 			var dirPath path.Resolved
-			ctx, dirPath, err = dag.InsertNodeAtPath(ctx, b.ipfs, pn, path.Join(path.New(instance.Path), pth), linkKey)
+			ctx, dirPath, err = dag.InsertNodeAtPath(ctx, t.b.ipfs, pn, path.Join(path.New(instance.Path), pth), linkKey)
 			if err != nil {
 				return 0, nil, err
 			}
-			ctx, err = dag.AddAndPinNodes(ctx, b.ipfs, nodes)
+			ctx, err = dag.AddAndPinNodes(ctx, t.b.ipfs, nodes)
 			if err != nil {
 				return 0, nil, err
 			}
 			instance.Path = dirPath.String()
 		}
 
-		if err := b.c.Save(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
+		if err := t.b.c.Save(ctx, t.thread, instance, collection.WithIdentity(t.identity)); err != nil {
 			return 0, nil, err
 		}
 	}
 
-	log.Debugf("pushed access roles for %s in %s", pth, key)
-	return dag.GetPinnedBytes(ctx), instanceToBucket(thread, instance), nil
+	log.Debugf("pushed access roles for %s in %s", pth, t.key)
+	return dag.GetPinnedBytes(ctx), instanceToBucket(t.thread, instance), nil
 }
 
 func (b *Buckets) PullPathAccessRoles(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (map[did.DID]collection.Role, error) {
 	pth, err := parsePath(pth)
 	if err != nil {

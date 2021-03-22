@@ -43,11 +43,21 @@ func (b *Buckets) PushPath(
 	ctx context.Context,
 	thread core.ID,
 	key string,
+	identity did.Token,
 	root path.Resolved,
 	input PushPathsInput,
-	identity did.Token,
 ) (*PushPathsResult, error) {
-	in, out, errs := b.PushPaths(ctx, thread, key, root, identity)
+	txn := b.NewTxn(thread, key, identity)
+	defer txn.Close()
+	return txn.PushPath(ctx, root, input)
+}
+
+func (t *Txn) PushPath(
+	ctx context.Context,
+	root path.Resolved,
+	input PushPathsInput,
+) (*PushPathsResult, error) {
+	in, out, errs := t.PushPaths(ctx, root)
 	if len(errs) != 0 {
 		err := <-errs
 		return nil, err
@@ -73,25 +83,38 @@ func (b *Buckets) PushPaths(
 	ctx context.Context,
 	thread core.ID,
 	key string,
-	root path.Resolved,
 	identity did.Token,
+	root path.Resolved,
 ) (chan<- PushPathsInput, <-chan PushPathsResult, <-chan error) {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
+	txn := b.NewTxn(thread, key, identity)
+	in, out, errs := txn.PushPaths(ctx, root)
 
+	errs2 := make(chan error, 1)
+	go func() {
+		defer txn.Close()
+		for err := range errs {
+			errs2 <- err
+			return
+		}
+	}()
+	return in, out, errs2
+}
+
+func (t *Txn) PushPaths(
+	ctx context.Context,
+	root path.Resolved,
+) (chan<- PushPathsInput, <-chan PushPathsResult, <-chan error) {
 	in := make(chan PushPathsInput)
 	out := make(chan PushPathsResult)
 	errs := make(chan error, 1)
 
-	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+	instance, err := t.b.c.GetSafe(ctx, t.thread, t.key, collection.WithIdentity(t.identity))
 	if err != nil {
 		errs <- err
-		lk.Release()
 		return in, out, errs
 	}
 	if root != nil && root.String() != instance.Path {
 		errs <- ErrNonFastForward
-		lk.Release()
 		return in, out, errs
 	}
 	readOnlyInstance := instance.Copy()
@@ -120,7 +143,7 @@ func (b *Buckets) PushPaths(
 				ctxLock.RLock()
 				ctx := ctx
 				ctxLock.RUnlock()
-				fa, err := queue.add(ctx, b.ipfs.Unixfs(), pth, input.Meta, func() ([]byte, error) {
+				fa, err := queue.add(ctx, t.b.ipfs.Unixfs(), pth, input.Meta, func() ([]byte, error) {
 					wg.Add(1)
 					readOnlyInstance.UpdatedAt = time.Now().UnixNano()
 					readOnlyInstance.SetMetadataAtPath(pth, collection.Metadata{
@@ -128,7 +151,12 @@ func (b *Buckets) PushPaths(
 						Info:      input.Meta,
 					})
 					readOnlyInstance.UnsetMetadataWithPrefix(pth + "/")
-					if err := b.c.Verify(ctx, thread, readOnlyInstance, collection.WithIdentity(identity)); err != nil {
+					if err := t.b.c.Verify(
+						ctx,
+						t.thread,
+						readOnlyInstance,
+						collection.WithIdentity(t.identity),
+					); err != nil {
 						return nil, fmt.Errorf("verifying bucket update: %v", err)
 					}
 					key, err := readOnlyInstance.GetFileEncryptionKeyForPath(pth)
@@ -173,7 +201,7 @@ func (b *Buckets) PushPaths(
 		if !changed {
 			return err
 		}
-		if serr := b.saveAndPublish(sctx, thread, instance, identity); serr != nil {
+		if serr := t.b.saveAndPublish(sctx, t.thread, t.identity, instance); serr != nil {
 			if err != nil {
 				return err
 			}
@@ -185,7 +213,6 @@ func (b *Buckets) PushPaths(
 	}
 
 	go func() {
-		defer lk.Release()
 		for {
 			select {
 			case res := <-addedCh:
@@ -193,7 +220,7 @@ func (b *Buckets) PushPaths(
 				ctx2 := ctx
 				ctxLock.RUnlock()
 
-				fn, err := b.ipfs.ResolveNode(ctx2, res.resolved)
+				fn, err := t.b.ipfs.ResolveNode(ctx2, res.resolved)
 				if err != nil {
 					errs <- saveWithErr(fmt.Errorf("resolving added node: %v", err))
 					return
@@ -203,7 +230,7 @@ func (b *Buckets) PushPaths(
 				if instance.IsPrivate() {
 					ctx2, dir, err = dag.InsertNodeAtPath(
 						ctx2,
-						b.ipfs,
+						t.b.ipfs,
 						fn,
 						path.Join(path.New(instance.Path), res.path),
 						instance.GetLinkEncryptionKey(),
@@ -213,7 +240,7 @@ func (b *Buckets) PushPaths(
 						return
 					}
 				} else {
-					dir, err = b.ipfs.Object().AddLink(
+					dir, err = t.b.ipfs.Object().AddLink(
 						ctx2,
 						path.New(instance.Path),
 						res.path,
@@ -224,7 +251,7 @@ func (b *Buckets) PushPaths(
 						errs <- saveWithErr(fmt.Errorf("adding bucket link: %v", err))
 						return
 					}
-					ctx2, err = dag.UpdateOrAddPin(ctx2, b.ipfs, path.New(instance.Path), dir)
+					ctx2, err = dag.UpdateOrAddPin(ctx2, t.b.ipfs, path.New(instance.Path), dir)
 					if err != nil {
 						errs <- saveWithErr(fmt.Errorf("updating bucket pin: %v", err))
 						return
@@ -248,7 +275,7 @@ func (b *Buckets) PushPaths(
 					Cid:    res.resolved.Cid(),
 					Size:   res.size,
 					Pinned: dag.GetPinnedBytes(ctx2),
-					Bucket: instanceToBucket(thread, instance),
+					Bucket: instanceToBucket(t.thread, instance),
 				}
 
 				ctxLock.Lock()
