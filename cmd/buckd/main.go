@@ -369,6 +369,12 @@ var rootCmd = &cobra.Command{
 			cmd.LogErr(err)
 			log.Info("gateway was shutdown")
 
+			err = ps.Close()
+			cmd.LogErr(err)
+			err = pss.Close()
+			cmd.LogErr(err)
+			log.Info("pinning service was shutdown")
+
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			err = proxy.Shutdown(ctx)
@@ -399,11 +405,9 @@ var rootCmd = &cobra.Command{
 			cmd.LogErr(err)
 			log.Info("ipns manager was shutdown")
 
-			err = ps.Close()
+			err = db.Close()
 			cmd.LogErr(err)
-			err = pss.Close()
-			cmd.LogErr(err)
-			log.Info("pinning service was shutdown")
+			log.Info("db client was shutdown")
 
 			err = net.Close()
 			cmd.LogErr(err)

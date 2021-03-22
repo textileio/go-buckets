@@ -39,7 +39,7 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 	net, err := nc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
 	require.NoError(t, err)
 
-	// @todo: Fix me
+	// @todo: Use service description to build client
 	doc, err := net.GetServices(context.Background())
 	require.NoError(t, err)
 
@@ -47,7 +47,8 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 	require.NoError(t, err)
 	ipfs, err := httpapi.NewApi(GetIPFSApiMultiAddr())
 	require.NoError(t, err)
-	ipnsm, err := ipns.NewManager(tdb.NewTxMapDatastore(), ipfs)
+	ipnsms := tdb.NewTxMapDatastore()
+	ipnsm, err := ipns.NewManager(ipnsms, ipfs)
 	require.NoError(t, err)
 	lib, err := buckets.NewBuckets(net, db, ipfs, ipnsm, nil)
 	require.NoError(t, err)
@@ -63,6 +64,8 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 		server.Stop()
 		require.NoError(t, lib.Close())
 		require.NoError(t, ipnsm.Close())
+		require.NoError(t, ipnsms.Close())
+		require.NoError(t, db.Close())
 		require.NoError(t, net.Close())
 	})
 

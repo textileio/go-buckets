@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -89,7 +88,6 @@ func (c *Client) NewTokenContext(
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(token)
 	return did.NewTokenContext(ctx, token), nil
 }
 

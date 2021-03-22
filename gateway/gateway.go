@@ -213,6 +213,7 @@ func (g *Gateway) getThread(c *gin.Context) (core.ID, error) {
 		}
 		return thread, nil
 	}
+	// @todo: Use a fixed length in-mem cache of thread IDs
 	ipnskey, err := g.ipns.Store().GetByCid(c.Param("key"))
 	if err != nil {
 		return "", fmt.Errorf("looking up thread: %v", err)
