@@ -59,22 +59,22 @@ func TestQueue_ListRequests(t *testing.T) {
 	l, err = q.ListRequests(key, Query{})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
-	assert.Equal(t, ids[0], l[0])
-	assert.Equal(t, ids[9], l[9])
+	assert.Equal(t, ids[0], l[0].ID)
+	assert.Equal(t, ids[9], l[9].ID)
 
 	// Get next page, should return next 10 older records
-	l, err = q.ListRequests(key, Query{After: l[len(l)-1]})
+	l, err = q.ListRequests(key, Query{After: l[len(l)-1].ID})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
-	assert.Equal(t, ids[10], l[0])
-	assert.Equal(t, ids[19], l[9])
+	assert.Equal(t, ids[10], l[0].ID)
+	assert.Equal(t, ids[19], l[9].ID)
 
 	// Get previous page, should return the first page in reverse order
-	l, err = q.ListRequests(key, Query{Before: l[0]})
+	l, err = q.ListRequests(key, Query{Before: l[0].ID})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
-	assert.Equal(t, ids[0], l[9])
-	assert.Equal(t, ids[9], l[0])
+	assert.Equal(t, ids[0], l[9].ID)
+	assert.Equal(t, ids[9], l[0].ID)
 
 	// Create more request with multiple statuses
 	now = time.Now()
@@ -105,22 +105,22 @@ func TestQueue_ListRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
 	for i := 0; i < len(l); i++ {
-		assert.Equal(t, ids[i], l[i])
+		assert.Equal(t, ids[i], l[i].ID)
 	}
 
 	// List only "pinned" statuses
 	l, err = q.ListRequests(key, Query{Status: []openapi.Status{openapi.PINNED}})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
-	assert.Equal(t, sids[0], l[0])
-	assert.Equal(t, sids[9], l[9])
+	assert.Equal(t, sids[0], l[0].ID)
+	assert.Equal(t, sids[9], l[9].ID)
 
 	// List only "failed" statuses
 	l, err = q.ListRequests(key, Query{Status: []openapi.Status{openapi.FAILED}})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
-	assert.Equal(t, fids[0], l[0])
-	assert.Equal(t, fids[9], l[9])
+	assert.Equal(t, fids[0], l[0].ID)
+	assert.Equal(t, fids[9], l[9].ID)
 }
 
 func TestQueue_AddRequest(t *testing.T) {
@@ -130,9 +130,10 @@ func TestQueue_AddRequest(t *testing.T) {
 	err := q.AddRequest(r)
 	require.NoError(t, err)
 
-	time.Sleep(time.Millisecond * 2)
-	_, err = q.GetRequest(r.Key, r.ID, openapi.PINNED)
+	time.Sleep(time.Millisecond * 5)
+	s, err := q.GetRequest(r.Key, r.ID)
 	require.NoError(t, err)
+	assert.Equal(t, openapi.PINNED, s.Status)
 }
 
 func TestQueue_RemoveRequest(t *testing.T) {
@@ -142,12 +143,12 @@ func TestQueue_RemoveRequest(t *testing.T) {
 	err := q.AddRequest(r)
 	require.NoError(t, err)
 
-	err = q.RemoveRequest(r.Key, r.ID)
-	require.Error(t, err) // pinning in-progress
-
-	time.Sleep(time.Millisecond * 2)
+	time.Sleep(time.Millisecond * 5)
 	err = q.RemoveRequest(r.Key, r.ID)
 	require.NoError(t, err)
+
+	_, err = q.GetRequest(r.Key, r.ID)
+	require.Error(t, err)
 }
 
 func TestQueueProcessing(t *testing.T) {
@@ -169,7 +170,7 @@ func TestQueueProcessing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(time.Millisecond) // wait for all to arrive in a queue, but before any jobs complete
+	time.Sleep(time.Millisecond * 5) // wait for all to arrive in a queue, but before any jobs complete
 
 	l, err := q.ListRequests(key1, Query{
 		Status: []openapi.Status{openapi.PINNING},
@@ -214,7 +215,7 @@ func newQueue(t *testing.T) *Queue {
 	require.NoError(t, err)
 	s, err := util.NewBadgerDatastore(dir, "pinq", false)
 	require.NoError(t, err)
-	q := NewQueue(s, handler, failureHandler)
+	q := NewQueue(s, handler)
 	t.Cleanup(func() {
 		require.NoError(t, q.Close())
 		require.NoError(t, s.Close())
@@ -230,10 +231,6 @@ func handler(_ context.Context, r Request) error {
 	} else {
 		return errors.New("bummer")
 	}
-}
-
-func failureHandler(_ context.Context, _ Request) error {
-	return nil
 }
 
 type outcomeType string

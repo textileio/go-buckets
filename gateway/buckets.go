@@ -44,13 +44,13 @@ func (g *Gateway) renderBucketPath(
 	pth string,
 	token did.Token,
 ) {
-	rep, buck, err := g.lib.ListPath(ctx, thread, id, pth, token)
+	rep, buck, err := g.lib.ListPath(ctx, thread, id, token, pth)
 	if err != nil {
 		render404(c)
 		return
 	}
 	if !rep.IsDir {
-		r, err := g.lib.PullPath(ctx, thread, buck.Key, pth, token)
+		r, err := g.lib.PullPath(ctx, thread, buck.Key, token, pth)
 		if err != nil {
 			render404(c)
 			return

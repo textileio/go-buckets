@@ -24,6 +24,7 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 	"github.com/textileio/go-threads/db"
 	nc "github.com/textileio/go-threads/net/api/client"
+	"github.com/textileio/go-threads/net/util"
 	nutil "github.com/textileio/go-threads/net/util"
 )
 
@@ -102,6 +103,34 @@ func (l lock) Key() string {
 	return string(l)
 }
 
+// Txn allows for holding a bucket lock while performing multiple write operations.
+type Txn struct {
+	b        *Buckets
+	thread   core.ID
+	key      string
+	identity did.Token
+	lock     *util.Semaphore
+}
+
+// Close the Txn, releasing the bucket for additional writes.
+func (t *Txn) Close() error {
+	t.lock.Release()
+	return nil
+}
+
+// NewTxn returns a new Txn for bucket key.
+func (b *Buckets) NewTxn(thread core.ID, key string, identity did.Token) *Txn {
+	lk := b.locks.Get(lock(key))
+	lk.Acquire()
+	return &Txn{
+		b:        b,
+		thread:   thread,
+		key:      key,
+		identity: identity,
+		lock:     lk,
+	}
+}
+
 // NewBuckets returns a new buckets library.
 func NewBuckets(
 	net *nc.Client,
@@ -151,22 +180,23 @@ func (b *Buckets) Get(ctx context.Context, thread core.ID, key string, identity 
 func (b *Buckets) GetLinks(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (links Links, err error) {
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
 		return links, err
 	}
 	log.Debugf("got %s links", key)
-	return b.GetLinksForBucket(ctx, instanceToBucket(thread, instance), pth, identity)
+	return b.GetLinksForBucket(ctx, instanceToBucket(thread, instance), identity, pth)
 }
 
 func (b *Buckets) GetLinksForBucket(
 	ctx context.Context,
 	bucket *Bucket,
-	pth string,
 	identity did.Token,
+	pth string,
 ) (links Links, err error) {
 	links.URL = fmt.Sprintf("%s/thread/%s/%s/%s", ThreadsGatewayURL, bucket.Thread, collection.Name, bucket.Key)
 	if len(WWWDomain) != 0 {
@@ -226,15 +256,17 @@ func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) 
 }
 
 func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identity did.Token) (int64, error) {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
-	defer lk.Release()
+	txn := b.NewTxn(thread, key, identity)
+	defer txn.Close()
+	return txn.Remove(ctx)
+}
 
-	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+func (t *Txn) Remove(ctx context.Context) (int64, error) {
+	instance, err := t.b.c.GetSafe(ctx, t.thread, t.key, collection.WithIdentity(t.identity))
 	if err != nil {
 		return 0, err
 	}
-	if err := b.c.Delete(ctx, thread, key, collection.WithIdentity(identity)); err != nil {
+	if err := t.b.c.Delete(ctx, t.thread, t.key, collection.WithIdentity(t.identity)); err != nil {
 		return 0, fmt.Errorf("deleting bucket: %v", err)
 	}
 
@@ -244,29 +276,29 @@ func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identi
 	}
 	linkKey := instance.GetLinkEncryptionKey()
 	if linkKey != nil {
-		ctx, err = dag.UnpinNodeAndBranch(ctx, b.ipfs, buckPath, linkKey)
+		ctx, err = dag.UnpinNodeAndBranch(ctx, t.b.ipfs, buckPath, linkKey)
 		if err != nil {
 			return 0, err
 		}
 	} else {
-		ctx, err = dag.UnpinPath(ctx, b.ipfs, buckPath)
+		ctx, err = dag.UnpinPath(ctx, t.b.ipfs, buckPath)
 		if err != nil {
 			return 0, err
 		}
 	}
-	if err := b.ipns.RemoveKey(ctx, key); err != nil {
+	if err := t.b.ipns.RemoveKey(ctx, t.key); err != nil {
 		return 0, err
 	}
 
-	log.Debugf("removed %s", key)
+	log.Debugf("removed %s", t.key)
 	return dag.GetPinnedBytes(ctx), nil
 }
 
 func (b *Buckets) saveAndPublish(
 	ctx context.Context,
 	thread core.ID,
-	instance *collection.Bucket,
 	identity did.Token,
+	instance *collection.Bucket,
 ) error {
 	if err := b.c.Save(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
 		return fmt.Errorf("saving bucket: %v", err)

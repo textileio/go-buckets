@@ -86,7 +86,7 @@ func (f *bucketFS) Exists(ctx context.Context, thread core.ID, key, pth string, 
 	if key == "" || pth == "/" {
 		return
 	}
-	rep, _, err := f.lib.ListPath(ctx, thread, key, pth, token)
+	rep, _, err := f.lib.ListPath(ctx, thread, key, token, pth)
 	if err != nil {
 		return
 	}
@@ -102,7 +102,7 @@ func (f *bucketFS) Exists(ctx context.Context, thread core.ID, key, pth string, 
 }
 
 func (f *bucketFS) Write(c *gin.Context, ctx context.Context, thread core.ID, key, pth string, token did.Token) error {
-	r, err := f.lib.PullPath(ctx, thread, key, pth, token)
+	r, err := f.lib.PullPath(ctx, thread, key, token, pth)
 	if err != nil {
 		return fmt.Errorf("pulling path: %v", err)
 	}
@@ -131,14 +131,14 @@ func (g *Gateway) renderWWWBucket(c *gin.Context, key string) {
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
 	token := did.Token(c.Query("token"))
-	rep, _, err := g.lib.ListPath(ctx, ipnskey.ThreadID, key, "", token)
+	rep, _, err := g.lib.ListPath(ctx, ipnskey.ThreadID, key, token, "")
 	if err != nil {
 		render404(c)
 		return
 	}
 	for _, item := range rep.Items {
 		if item.Name == "index.html" {
-			r, err := g.lib.PullPath(ctx, ipnskey.ThreadID, key, item.Name, token)
+			r, err := g.lib.PullPath(ctx, ipnskey.ThreadID, key, token, item.Name)
 			if err != nil {
 				render404(c)
 				return

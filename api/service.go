@@ -57,7 +57,7 @@ func (s *Service) Create(ctx context.Context, req *pb.CreateRequest) (*pb.Create
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.lib.GetLinksForBucket(ctx, bucket, "", identity)
+	links, err := s.lib.GetLinksForBucket(ctx, bucket, identity, "")
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (s *Service) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse,
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.lib.GetLinksForBucket(ctx, bucket, "", identity)
+	links, err := s.lib.GetLinksForBucket(ctx, bucket, identity, "")
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) GetLinks(ctx context.Context, req *pb.GetLinksRequest) (*pb.Ge
 		return nil, err
 	}
 
-	links, err := s.lib.GetLinks(ctx, thread, req.Key, req.Path, identity)
+	links, err := s.lib.GetLinks(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +147,11 @@ func (s *Service) ListPath(ctx context.Context, req *pb.ListPathRequest) (*pb.Li
 		return nil, err
 	}
 
-	item, bucket, err := s.lib.ListPath(ctx, thread, req.Key, req.Path, identity)
+	item, bucket, err := s.lib.ListPath(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.lib.GetLinksForBucket(ctx, bucket, req.Path, identity)
+	links, err := s.lib.GetLinksForBucket(ctx, bucket, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 		return fmt.Errorf("push bucket path header is required")
 	}
 
-	in, out, errs := s.lib.PushPaths(server.Context(), thread, key, root, identity)
+	in, out, errs := s.lib.PushPaths(server.Context(), thread, key, identity, root)
 	if len(errs) != 0 {
 		return <-errs
 	}
@@ -256,7 +256,7 @@ func (s *Service) PullPath(req *pb.PullPathRequest, server pb.APIService_PullPat
 		return err
 	}
 
-	reader, err := s.lib.PullPath(server.Context(), thread, req.Key, req.Path, identity)
+	reader, err := s.lib.PullPath(server.Context(), thread, req.Key, identity, req.Path)
 	if err != nil {
 		return err
 	}
@@ -319,7 +319,7 @@ func (s *Service) SetPath(ctx context.Context, req *pb.SetPathRequest) (*pb.SetP
 		return nil, fmt.Errorf("decoding cid: %v", err)
 	}
 
-	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, root, req.Path, cid, nil, identity)
+	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, identity, root, req.Path, cid, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +340,7 @@ func (s *Service) MovePath(ctx context.Context, req *pb.MovePathRequest) (res *p
 		return nil, err
 	}
 
-	pinned, bucket, err := s.lib.MovePath(ctx, thread, req.Key, root, req.FromPath, req.ToPath, identity)
+	pinned, bucket, err := s.lib.MovePath(ctx, thread, req.Key, identity, root, req.FromPath, req.ToPath)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +360,7 @@ func (s *Service) RemovePath(ctx context.Context, req *pb.RemovePathRequest) (re
 		return nil, err
 	}
 
-	pinned, bucket, err := s.lib.RemovePath(ctx, thread, req.Key, root, req.Path, identity)
+	pinned, bucket, err := s.lib.RemovePath(ctx, thread, req.Key, identity, root, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +384,7 @@ func (s *Service) PushPathAccessRoles(
 	}
 	roles := cast.RolesFromPb(req.Roles)
 
-	pinned, bucket, err := s.lib.PushPathAccessRoles(ctx, thread, req.Key, root, req.Path, roles, identity)
+	pinned, bucket, err := s.lib.PushPathAccessRoles(ctx, thread, req.Key, identity, root, req.Path, roles)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +403,7 @@ func (s *Service) PullPathAccessRoles(
 		return nil, err
 	}
 
-	roles, err := s.lib.PullPathAccessRoles(ctx, thread, req.Key, req.Path, identity)
+	roles, err := s.lib.PullPathAccessRoles(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +429,7 @@ func (s *Service) PushPathInfo(
 		return nil, err
 	}
 
-	bucket, err := s.lib.PushPathInfo(ctx, thread, req.Key, root, req.Path, info, identity)
+	bucket, err := s.lib.PushPathInfo(ctx, thread, req.Key, identity, root, req.Path, info)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +447,7 @@ func (s *Service) PullPathInfo(
 		return nil, err
 	}
 
-	info, err := s.lib.PullPathInfo(ctx, thread, req.Key, req.Path, identity)
+	info, err := s.lib.PullPathInfo(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}

@@ -35,11 +35,12 @@ func (r *pathReader) Close() error {
 func (b *Buckets) PullPath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (io.ReadCloser, error) {
 	pth = trimSlash(pth)
-	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, pth, identity)
+	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, identity, pth)
 	if err != nil {
 		return nil, err
 	}

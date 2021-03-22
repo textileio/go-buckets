@@ -1,5 +1,7 @@
 package gateway
 
+// @todo: Migrate away from the current asset generator
+
 import (
 	"bytes"
 	"context"
