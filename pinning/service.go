@@ -6,7 +6,6 @@ package pinning
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,8 +28,10 @@ var (
 	// ErrPinNotFound a pin was not found.
 	ErrPinNotFound = errors.New("pin not found")
 
+	// PinTimeout is the max time taken to pin a Cid.
+	PinTimeout = time.Hour
+
 	statusTimeout = time.Minute
-	pinTimeout    = time.Hour
 )
 
 // Service provides a bucket-based IPFS Pinning Service based on the OpenAPI spec:
@@ -40,7 +41,7 @@ type Service struct {
 	queue *q.Queue
 }
 
-// NewService returns a new Service.
+// NewService returns a new pinning Service.
 func NewService(lib *buckets.Buckets, store kt.TxnDatastoreExtended) *Service {
 	s := &Service{lib: lib}
 	s.queue = q.NewQueue(store, s.handleRequest)
@@ -54,15 +55,14 @@ func (s *Service) Close() error {
 
 // ListPins returns a list of openapi.PinStatus matching the Query.
 func (s *Service) ListPins(
+	ctx context.Context,
 	thread core.ID,
 	key string,
 	query q.Query,
 	identity did.Token,
 ) ([]openapi.PinStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
-	defer cancel()
-	buck, err := s.lib.Get(ctx, thread, key, identity)
-	if err != nil {
+	// Ensure bucket is readable by identity
+	if _, err := s.lib.Get(ctx, thread, key, identity); err != nil {
 		return nil, err
 	}
 
@@ -71,21 +71,13 @@ func (s *Service) ListPins(
 		return nil, fmt.Errorf("listing requests: %v", err)
 	}
 
-	var stats []openapi.PinStatus
-	for _, r := range list {
-		status, err := getBucketStatus(buck, &r)
-		if err != nil {
-			return nil, err
-		}
-		stats = append(stats, *status)
-	}
-
-	log.Debugf("listed %d requests in %s", len(stats), key)
-	return stats, nil
+	log.Debugf("listed %d requests in %s", len(list), key)
+	return list, nil
 }
 
 // AddPin adds an openapi.Pin to a bucket.
 func (s *Service) AddPin(
+	ctx context.Context,
 	thread core.ID,
 	key string,
 	pin openapi.Pin,
@@ -96,46 +88,25 @@ func (s *Service) AddPin(
 		return nil, fmt.Errorf("decoding pin cid: %v", err)
 	}
 
-	status := &openapi.PinStatus{
+	status := openapi.PinStatus{
 		Requestid: q.NewID(),
 		Status:    openapi.QUEUED,
 		Created:   time.Now(),
 		Pin:       pin,
 	}
 
-	// Push a placeholder to the bucket
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
-	defer cancel()
-	if _, err := s.lib.PushPath(
-		ctx,
-		thread,
-		key,
-		identity,
-		nil,
-		buckets.PushPathsInput{
-			Path:   status.Requestid,
-			Reader: strings.NewReader(fmt.Sprintf("pin %s in progress", pin.Cid)),
-			Meta: map[string]interface{}{
-				"pin": status,
-			},
-		},
-	); err != nil {
-		return nil, fmt.Errorf("pushing status to bucket: %v", err)
-	}
-
 	// Enqueue request
 	if err := s.queue.AddRequest(q.Request{
-		ID:       status.Requestid,
-		Cid:      status.Pin.Cid,
-		Thread:   thread,
-		Key:      key,
-		Identity: identity,
+		PinStatus: status,
+		Thread:    thread,
+		Key:       key,
+		Identity:  identity,
 	}); err != nil {
 		return nil, fmt.Errorf("adding request: %v", err)
 	}
 
 	log.Debugf("added request %s in %s", status.Requestid, key)
-	return status, nil
+	return &status, nil
 }
 
 // handleRequest attempts to pin the request Cid to the bucket path (request ID).
@@ -143,7 +114,7 @@ func (s *Service) AddPin(
 // because we have that info in the embedded queue and can therefore avoid an extra bucket write.
 // In other words, the bucket state will show "queued", "pinned", or "failed", but not "pinning".
 func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
-	log.Debugf("processing request: %s", r.ID)
+	log.Debugf("handling request: %s", r.Requestid)
 
 	// Open a transaction that we can use to control blocking since we may need
 	// to push a failure to the bucket if SetPath fails.
@@ -157,21 +128,18 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 		return reason
 	}
 
-	cid, err := c.Decode(r.Cid)
+	cid, err := c.Decode(r.Pin.Cid)
 	if err != nil {
 		return fail(fmt.Errorf("decoding cid: %v", err))
 	}
 
 	// Replace placeholder with requested Cid and set status to "pinned"
-	pctx, pcancel := context.WithTimeout(ctx, pinTimeout)
+	pctx, pcancel := context.WithTimeout(ctx, PinTimeout)
 	defer pcancel()
-	if _, _, err := s.lib.SetPath(
+	if _, _, err := txn.SetPath(
 		pctx,
-		r.Thread,
-		r.Key,
-		r.Identity,
 		nil,
-		r.ID,
+		r.Requestid,
 		cid,
 		map[string]interface{}{
 			"pin": map[string]interface{}{
@@ -179,16 +147,17 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 			},
 		},
 	); err != nil {
-		return fail(fmt.Errorf("setting path %s: %v", r.ID, err))
+		// @todo: Skip fail handler if path not found
+		return fail(fmt.Errorf("setting path %s: %v", r.Requestid, err))
 	}
 
-	log.Debugf("request completed: %s", r.ID)
+	log.Debugf("request completed: %s", r.Requestid)
 	return nil
 }
 
 // failRequest updates the bucket path (request ID) with an error.
 func (s *Service) failRequest(ctx context.Context, txn *buckets.Txn, r q.Request, reason error) error {
-	log.Debugf("failing request: %s", r.ID)
+	log.Debugf("failing request %s with reason: %v", r.Requestid, reason)
 
 	// Update placeholder with status "failed"
 	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
@@ -197,8 +166,8 @@ func (s *Service) failRequest(ctx context.Context, txn *buckets.Txn, r q.Request
 		ctx,
 		nil,
 		buckets.PushPathsInput{
-			Path:   r.ID,
-			Reader: strings.NewReader(fmt.Sprintf("pin %s failed: %v", r.Cid, reason)),
+			Path:   r.Requestid,
+			Reader: strings.NewReader(fmt.Sprintf("pin %s failed: %v", r.Pin.Cid, reason)),
 			Meta: map[string]interface{}{
 				"pin": map[string]interface{}{
 					"status": openapi.FAILED,
@@ -209,37 +178,20 @@ func (s *Service) failRequest(ctx context.Context, txn *buckets.Txn, r q.Request
 		return fmt.Errorf("pushing status to bucket: %v", err)
 	}
 
-	log.Debugf("request failed: %s", r.ID)
+	log.Debugf("request failed: %s", r.Requestid)
 	return nil
 }
 
 // GetPin returns an openapi.PinStatus.
 func (s *Service) GetPin(
-	thread core.ID,
-	key string,
-	id string,
-	identity did.Token,
-) (*openapi.PinStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
-	defer cancel()
-	status, err := s.getPin(ctx, thread, key, id, identity)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Debugf("got request %s in %s", id, key)
-	return status, nil
-}
-
-func (s *Service) getPin(
 	ctx context.Context,
 	thread core.ID,
 	key string,
 	id string,
 	identity did.Token,
 ) (*openapi.PinStatus, error) {
-	buck, err := s.lib.Get(ctx, thread, key, identity)
-	if err != nil {
+	// Ensure bucket is readable by identity
+	if _, err := s.lib.Get(ctx, thread, key, identity); err != nil {
 		return nil, err
 	}
 
@@ -250,11 +202,13 @@ func (s *Service) getPin(
 		return nil, err
 	}
 
-	return getBucketStatus(buck, r)
+	log.Debugf("got request %s in %s", id, key)
+	return r, nil
 }
 
 // ReplacePin replaces an openapi.PinStatus with another.
 func (s *Service) ReplacePin(
+	ctx context.Context,
 	thread core.ID,
 	key string,
 	id string,
@@ -267,13 +221,11 @@ func (s *Service) ReplacePin(
 	}
 
 	// Ensure bucket is readable
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
-	defer cancel()
-	if _, err := s.getPin(ctx, thread, key, id, identity); err != nil {
-		return nil, err
-	}
+	//if _, err := s.GetPin(ctx, thread, key, id, identity); err != nil {
+	//	return nil, err
+	//}
 
-	status := &openapi.PinStatus{
+	status := openapi.PinStatus{
 		Requestid: id,
 		Status:    openapi.QUEUED,
 		Created:   time.Now(),
@@ -281,42 +233,34 @@ func (s *Service) ReplacePin(
 	}
 
 	// Push a new placeholder to the bucket. This will block if the request is pinning.
-	if _, err := s.lib.PushPath(
-		ctx,
-		thread,
-		key,
-		identity,
-		nil,
-		buckets.PushPathsInput{
-			Path:   status.Requestid,
-			Reader: strings.NewReader(fmt.Sprintf("pin %s in progress", pin.Cid)),
-			Meta: map[string]interface{}{
-				"pin": status,
-			},
-		},
-	); err != nil {
-		return nil, fmt.Errorf("pushing new status to bucket: %v", err)
-	}
+	//if _, err := s.lib.PushPath(
+	//	ctx,
+	//	thread,
+	//	key,
+	//	identity,
+	//	nil,
+	//	buckets.PushPathsInput{
+	//		Path:   status.Requestid,
+	//		Reader: strings.NewReader(fmt.Sprintf("pin %s in progress", pin.Cid)),
+	//		Meta: map[string]interface{}{
+	//			"pin": status,
+	//		},
+	//	},
+	//); err != nil {
+	//	return nil, fmt.Errorf("pushing new status to bucket: %v", err)
+	//}
 
 	// Remove from queues.
-	// Note: If the request was pinning when ReplacePin was called, it has now completed
-	// and the embedded queue moved it to its final home (pinned/failed).
-	// Technically, there's now a race between that final move and the following
-	// RemoveRequest. In practice, PushPath will "always" take longer then
-	// that final move operation, meaning the final move operation will "always" win.
-	// In any case, if RemoveRequest wins, the final move operation fails and carries on
-	// without issue. Mentioning here for clarity.
 	if err := s.queue.RemoveRequest(key, id); err != nil {
 		return nil, fmt.Errorf("removing request: %v", err)
 	}
 
 	// Re-enqueue request
 	if err := s.queue.AddRequest(q.Request{
-		ID:       status.Requestid,
-		Cid:      status.Pin.Cid,
-		Thread:   thread,
-		Key:      key,
-		Identity: identity,
+		PinStatus: status,
+		Thread:    thread,
+		Key:       key,
+		Identity:  identity,
 	}); err != nil {
 		return nil, fmt.Errorf("adding request: %v", err)
 	}
@@ -327,14 +271,13 @@ func (s *Service) ReplacePin(
 
 // RemovePin removes an openapi.PinStatus from a bucket.
 func (s *Service) RemovePin(
+	ctx context.Context,
 	thread core.ID,
 	key string,
 	id string,
 	identity did.Token,
 ) error {
 	// Remove from bucket. This will block if the request is pinning.
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
-	defer cancel()
 	if _, _, err := s.lib.RemovePath(
 		ctx,
 		thread,
@@ -353,33 +296,4 @@ func (s *Service) RemovePin(
 
 	log.Debugf("removed request %s in %s", id, key)
 	return nil
-}
-
-func getBucketStatus(b *buckets.Bucket, s *q.Status) (*openapi.PinStatus, error) {
-	// Cross-check results from the embedded queue with bucket state,
-	// since it may have been mutated out-of-band.
-	md, ok := b.Metadata[s.ID].Info["pin"]
-	if ok {
-		status, err := statusFromMeta(md)
-		if err != nil {
-			return nil, err
-		}
-		// The request may be pinning but this won't be reflected in the bucket state.
-		// Ssee s.handleRequest for details.
-		status.Status = s.Status
-		return status, nil
-	}
-	return nil, ErrPinNotFound
-}
-
-func statusFromMeta(m interface{}) (*openapi.PinStatus, error) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		return nil, fmt.Errorf("marshalling request: %v", err)
-	}
-	var status openapi.PinStatus
-	if err := json.Unmarshal(data, &status); err != nil {
-		return nil, fmt.Errorf("unmarshalling request: %v", err)
-	}
-	return &status, nil
 }

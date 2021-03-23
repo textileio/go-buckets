@@ -16,7 +16,7 @@ type Query struct {
 	// Match can be used to customize the text matching strategy applied when Name is present.
 	Match TextMatchingStrategy `form:"match" json:"match,omitempty"`
 	// Status can be used to filter by Pin status.
-	Status []Status `form:"status" json:"status,omitempty"`
+	Status string `form:"status" json:"status,omitempty"`
 	// Before can by used to filter by before creation (queued) time.
 	Before *time.Time `form:"before" json:"before,omitempty"`
 	// After can by used to filter by after creation (queued) time.

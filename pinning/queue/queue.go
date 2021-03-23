@@ -69,17 +69,11 @@ func NewIDFromTime(t time.Time) string {
 }
 
 type Request struct {
-	ID  string
-	Cid string
+	openapi.PinStatus
 
 	Thread   core.ID
 	Key      string
 	Identity did.Token
-}
-
-type Status struct {
-	ID     string
-	Status openapi.Status
 }
 
 type Query struct {
@@ -148,7 +142,7 @@ func (q *Queue) Close() error {
 
 // ListRequests lists request for key by applying a Query.
 // This is optimize for single-status queries (the default query is for only openapi.PINNED requests).
-func (q *Queue) ListRequests(key string, query Query) ([]Status, error) {
+func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, error) {
 	query = query.setDefaults()
 	if len(query.Before) != 0 && len(query.After) != 0 {
 		return nil, fmt.Errorf("before and after cannot be used together")
@@ -158,9 +152,9 @@ func (q *Queue) ListRequests(key string, query Query) ([]Status, error) {
 		order = dsq.OrderByKeyDescending{}
 	}
 
-	var all []Status
+	var all []openapi.PinStatus
 	for _, s := range query.Status {
-		var reqs []Status
+		var reqs []openapi.PinStatus
 
 		pre, err := getStatusKeyPrefix(s)
 		if err != nil {
@@ -183,10 +177,9 @@ func (q *Queue) ListRequests(key string, query Query) ([]Status, error) {
 
 		results, err := q.store.QueryExtended(dsextensions.QueryExt{
 			Query: dsq.Query{
-				Prefix:   pre.ChildString(key).String(),
-				Orders:   []dsq.Order{order},
-				Limit:    limit,
-				KeysOnly: true,
+				Prefix: pre.ChildString(key).String(),
+				Orders: []dsq.Order{order},
+				Limit:  limit,
 			},
 			SeekPrefix: seekKey,
 		})
@@ -199,16 +192,17 @@ func (q *Queue) ListRequests(key string, query Query) ([]Status, error) {
 				results.Close()
 				return nil, fmt.Errorf("getting next result: %v", res.Error)
 			}
-			reqs = append(reqs, Status{
-				ID:     strings.TrimPrefix(res.Key, pre.ChildString(key).String()+"/"),
-				Status: s,
-			})
+			r, err := decode(res.Value)
+			if err != nil {
+				return nil, fmt.Errorf("decoding request: %v", err)
+			}
+			reqs = append(reqs, r.PinStatus)
 		}
 		results.Close()
 
 		if len(seek) != 0 && len(reqs) > 0 {
 			// Remove seek from tip if it matches the first record
-			if seek == reqs[0].ID {
+			if seek == reqs[0].Requestid {
 				reqs = reqs[1:]
 			} else if len(reqs) == limit { // All elements are valid, remove the extra element
 				reqs = reqs[:len(reqs)-1]
@@ -223,14 +217,14 @@ func (q *Queue) ListRequests(key string, query Query) ([]Status, error) {
 		switch order.(type) {
 		case dsq.OrderByKeyDescending:
 			sort.Slice(all, func(i, j int) bool {
-				return all[i].ID > all[j].ID
+				return all[i].Requestid > all[j].Requestid
 			})
 			if len(all) > query.Limit {
 				all = all[len(all)-query.Limit:]
 			}
 		default:
 			sort.Slice(all, func(i, j int) bool {
-				return all[i].ID < all[j].ID
+				return all[i].Requestid < all[j].Requestid
 			})
 			if len(all) > query.Limit {
 				all = all[:query.Limit]
@@ -245,7 +239,7 @@ func (q *Queue) AddRequest(r Request) error {
 	return q.enqueue(r, true)
 }
 
-func (q *Queue) GetRequest(key, id string) (*Status, error) {
+func (q *Queue) GetRequest(key, id string) (*openapi.PinStatus, error) {
 	statuses := []openapi.Status{
 		openapi.QUEUED,
 		openapi.PINNING,
@@ -257,15 +251,17 @@ func (q *Queue) GetRequest(key, id string) (*Status, error) {
 		if err != nil {
 			return nil, fmt.Errorf("getting status prefix: %v", err)
 		}
-		if _, err := q.store.Get(getStatusKey(pre, key, id)); errors.Is(err, ds.ErrNotFound) {
+		val, err := q.store.Get(getStatusKey(pre, key, id))
+		if errors.Is(err, ds.ErrNotFound) {
 			continue
 		} else if err != nil {
 			return nil, fmt.Errorf("getting status key: %v", err)
 		}
-		return &Status{
-			ID:     id,
-			Status: s,
-		}, nil
+		r, err := decode(val)
+		if err != nil {
+			return nil, fmt.Errorf("decoding request: %v", err)
+		}
+		return &r.PinStatus, nil
 	}
 	return nil, ds.ErrNotFound
 }
@@ -308,7 +304,7 @@ func (q *Queue) enqueue(r Request, isNew bool) error {
 		}
 
 		// Put the new request directly in the "pinning" queue in case a worker is available now
-		if err := q.store.Put(getStatusKey(dsPinningStatusPrefix, r.Key, r.ID), val); err != nil {
+		if err := q.store.Put(getStatusKey(dsPinningStatusPrefix, r.Key, r.Requestid), val); err != nil {
 			return fmt.Errorf("putting status key: %v", err)
 		}
 	} else {
@@ -323,6 +319,7 @@ func (q *Queue) enqueue(r Request, isNew bool) error {
 		select {
 		case q.jobCh <- r:
 		default:
+			log.Debugf("workers are busy; queueing %s", r.Requestid)
 			// Workers are busy, put back in the "queued" queue
 			if err := q.moveRequest(r, openapi.PINNING, openapi.QUEUED); err != nil {
 				log.Debugf("error updating status (queued): %v", err)
@@ -354,7 +351,7 @@ func (q *Queue) getNext() {
 		return
 	}
 	if len(queue) > 0 {
-		log.Debug("enqueueing job: %s", queue[0].ID)
+		log.Debug("enqueueing job: %s", queue[0].Requestid)
 	}
 	for _, r := range queue {
 		if err := q.enqueue(r, false); err != nil {
@@ -398,7 +395,7 @@ func (q *Queue) worker(num int) {
 			if q.ctx.Err() != nil {
 				return
 			}
-			log.Debugf("worker %d got job %s", num, r.ID)
+			log.Debugf("worker %d got job %s", num, r.Requestid)
 
 			// Handle the request with the handler func
 			status := openapi.PINNED
@@ -412,8 +409,10 @@ func (q *Queue) worker(num int) {
 				log.Debugf("error updating status (%s): %v", status, err)
 			}
 
-			log.Debugf("worker %d finished job %s", num, r.ID)
-			q.doneCh <- struct{}{}
+			log.Debugf("worker %d finished job %s", num, r.Requestid)
+			go func() {
+				q.doneCh <- struct{}{}
+			}()
 		}
 	}
 }
@@ -427,8 +426,8 @@ func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	if err != nil {
 		return fmt.Errorf("getting 'to' prefix: %v", err)
 	}
-	fromKey := getStatusKey(fromPre, r.Key, r.ID)
-	toKey := getStatusKey(toPre, r.Key, r.ID)
+	fromKey := getStatusKey(fromPre, r.Key, r.Requestid)
+	toKey := getStatusKey(toPre, r.Key, r.Requestid)
 
 	txn, err := q.store.NewTransaction(false)
 	if err != nil {
@@ -444,13 +443,13 @@ func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 
 	// Delete from global queue
 	if from == openapi.QUEUED {
-		if err := txn.Delete(dsQueuePrefix.ChildString(r.ID)); err != nil {
+		if err := txn.Delete(dsQueuePrefix.ChildString(r.Requestid)); err != nil {
 			return fmt.Errorf("deleting key: %v", err)
 		}
 	}
 	// Add to global queue
 	if to == openapi.QUEUED {
-		if err := txn.Put(dsQueuePrefix.ChildString(r.ID), val); err != nil {
+		if err := txn.Put(dsQueuePrefix.ChildString(r.Requestid), val); err != nil {
 			return fmt.Errorf("putting key: %v", err)
 		}
 	}

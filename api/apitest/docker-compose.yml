@@ -1,7 +1,7 @@
 version: "3"
 services:
   threads:
-    image: textile/go-threads:534a6d0
+    image: textile/go-threads:1ef50f7
     environment:
       - THREADS_APIADDR=/ip4/0.0.0.0/tcp/5000
       - THREADS_APIPROXYADDR=/ip4/0.0.0.0/tcp/5050
@@ -11,7 +11,7 @@ services:
       - "127.0.0.1:4002:5000"
       - "127.0.0.1:4052:5050"
   ipfs:
-    image: ipfs/go-ipfs:v0.8.0
+    image: textile/go-ipfs:v0.8.0-m1
     environment:
       - IPFS_PROFILE=test
     ports:

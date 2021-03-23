@@ -136,7 +136,7 @@ func (g *Gateway) pushBucketPaths(c *gin.Context, thread core.ID, key string) {
 		select {
 		case res := <-out:
 			results.Results = append(results.Results, PushPathsResult{
-				Path: res.Path.String(),
+				Path: res.Path,
 				Cid:  res.Cid.String(),
 				Size: res.Size,
 			})

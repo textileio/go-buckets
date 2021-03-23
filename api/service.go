@@ -234,7 +234,7 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 		select {
 		case res := <-out:
 			if err := server.Send(&pb.PushPathsResponse{
-				Path:   res.Path.String(),
+				Path:   res.Path,
 				Cid:    res.Cid.String(),
 				Size:   res.Size,
 				Pinned: res.Pinned,

@@ -69,7 +69,7 @@ func NewClient(addr string, opts ...grpc.DialOption) (*Client, error) {
 	return &Client{
 		c:      pb.NewAPIServiceClient(conn),
 		conn:   conn,
-		target: "did:key:foo", // @todo: Fix me
+		target: "did:key:foo", // @todo: Get target from thread services
 	}, nil
 }
 
