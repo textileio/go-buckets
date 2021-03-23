@@ -450,6 +450,8 @@ func detectReaderOrPathContentType(r io.Reader, pth string) (string, io.Reader, 
 		return "text/css", reader, nil
 	case ".js":
 		return "application/javascript", reader, nil
+	case ".txt", ".md":
+		return "text/plain", reader, nil
 	default:
 		return http.DetectContentType(buf[:]), reader, nil
 	}

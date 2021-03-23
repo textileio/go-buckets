@@ -298,6 +298,7 @@ func (q *Queue) RemoveRequest(key, id string) error {
 func (q *Queue) enqueue(r Request, isNew bool) error {
 	// Block while the request is placed in a queue
 	if isNew {
+		r.Status = openapi.PINNING
 		val, err := encode(r)
 		if err != nil {
 			return fmt.Errorf("encoding request: %v", err)
@@ -439,6 +440,15 @@ func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	val, err := q.store.Get(fromKey)
 	if err != nil {
 		return fmt.Errorf("getting status key: %v", err)
+	}
+	r, err = decode(val)
+	if err != nil {
+		return fmt.Errorf("decoding status key: %v", err)
+	}
+	r.Status = to
+	val, err = encode(r)
+	if err != nil {
+		return fmt.Errorf("encoding status key: %v", err)
 	}
 
 	// Delete from global queue

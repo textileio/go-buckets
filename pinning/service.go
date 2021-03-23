@@ -220,35 +220,12 @@ func (s *Service) ReplacePin(
 		return nil, fmt.Errorf("decoding pin cid: %v", err)
 	}
 
-	// Ensure bucket is readable
-	//if _, err := s.GetPin(ctx, thread, key, id, identity); err != nil {
-	//	return nil, err
-	//}
-
 	status := openapi.PinStatus{
 		Requestid: id,
 		Status:    openapi.QUEUED,
 		Created:   time.Now(),
 		Pin:       pin,
 	}
-
-	// Push a new placeholder to the bucket. This will block if the request is pinning.
-	//if _, err := s.lib.PushPath(
-	//	ctx,
-	//	thread,
-	//	key,
-	//	identity,
-	//	nil,
-	//	buckets.PushPathsInput{
-	//		Path:   status.Requestid,
-	//		Reader: strings.NewReader(fmt.Sprintf("pin %s in progress", pin.Cid)),
-	//		Meta: map[string]interface{}{
-	//			"pin": status,
-	//		},
-	//	},
-	//); err != nil {
-	//	return nil, fmt.Errorf("pushing new status to bucket: %v", err)
-	//}
 
 	// Remove from queues.
 	if err := s.queue.RemoveRequest(key, id); err != nil {
