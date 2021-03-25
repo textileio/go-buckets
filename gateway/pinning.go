@@ -3,10 +3,12 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	c "github.com/ipfs/go-cid"
 	"github.com/textileio/go-buckets/pinning"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 	"github.com/textileio/go-buckets/pinning/queue"
@@ -34,9 +36,15 @@ func (g *Gateway) listPins(c *gin.Context, key string) {
 		return
 	}
 
+	q, err := oapiQueryToQuery(query)
+	if err != nil {
+		newFailure(c, http.StatusBadRequest, err)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	pins, err := g.ps.ListPins(ctx, thread, key, oapiQueryToQuery(query), token)
+	pins, err := g.ps.ListPins(ctx, thread, key, token, q)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
@@ -49,14 +57,23 @@ func (g *Gateway) listPins(c *gin.Context, key string) {
 	c.JSON(http.StatusOK, res)
 }
 
-// @todo: Validate Cids
-func oapiQueryToQuery(q openapi.Query) queue.Query {
+func oapiQueryToQuery(q openapi.Query) (queue.Query, error) {
 	var (
-		status        []openapi.Status
+		cids          []c.Cid
+		statuses      []openapi.Status
 		before, after string
 		limit         int
 		meta          map[string]string
 	)
+	if len(q.Cid) != 0 {
+		for _, i := range q.Cid {
+			d, err := c.Decode(i)
+			if err != nil {
+				return queue.Query{}, fmt.Errorf("decoding pin cid: %v", err)
+			}
+			cids = append(cids, d)
+		}
+	}
 	if len(q.Status) != 0 {
 		for _, p := range strings.Split(q.Status, ",") {
 			var s openapi.Status
@@ -72,7 +89,7 @@ func oapiQueryToQuery(q openapi.Query) queue.Query {
 			default:
 				continue
 			}
-			status = append(status, s)
+			statuses = append(statuses, s)
 		}
 	}
 	if q.Before != nil {
@@ -88,15 +105,15 @@ func oapiQueryToQuery(q openapi.Query) queue.Query {
 		meta = *q.Meta
 	}
 	return queue.Query{
-		Cid:    q.Cid,
-		Name:   q.Name,
-		Match:  q.Match,
-		Status: status,
-		Before: before,
-		After:  after,
-		Limit:  limit,
-		Meta:   meta,
-	}
+		Cid:      cids,
+		Name:     q.Name,
+		Match:    q.Match,
+		Statuses: statuses,
+		Before:   before,
+		After:    after,
+		Limit:    limit,
+		Meta:     meta,
+	}, nil
 }
 
 func (g *Gateway) addPinHandler(c *gin.Context) {
@@ -123,7 +140,7 @@ func (g *Gateway) addPin(c *gin.Context, key string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	status, err := g.ps.AddPin(ctx, thread, key, pin, token)
+	status, err := g.ps.AddPin(ctx, thread, key, token, pin)
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
@@ -150,7 +167,7 @@ func (g *Gateway) getPin(c *gin.Context, key, id string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	status, err := g.ps.GetPin(ctx, thread, key, id, token)
+	status, err := g.ps.GetPin(ctx, thread, key, token, id)
 	if errors.Is(pinning.ErrPinNotFound, err) {
 		newFailure(c, http.StatusNotFound, err)
 		return
@@ -186,7 +203,7 @@ func (g *Gateway) replacePin(c *gin.Context, key, id string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	status, err := g.ps.ReplacePin(ctx, thread, key, id, pin, token)
+	status, err := g.ps.ReplacePin(ctx, thread, key, token, id, pin)
 	if errors.Is(pinning.ErrPinNotFound, err) {
 		newFailure(c, http.StatusNotFound, err)
 		return
@@ -216,7 +233,7 @@ func (g *Gateway) removePin(c *gin.Context, key, id string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	if err := g.ps.RemovePin(ctx, thread, key, id, token); errors.Is(pinning.ErrPinNotFound, err) {
+	if err := g.ps.RemovePin(ctx, thread, key, token, id); errors.Is(pinning.ErrPinNotFound, err) {
 		newFailure(c, http.StatusNotFound, err)
 		return
 	} else if err != nil {

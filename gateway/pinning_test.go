@@ -18,6 +18,7 @@ import (
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	maddr "github.com/multiformats/go-multiaddr"
+	"github.com/oklog/ulid/v2"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,6 +52,8 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
+	queue.MaxConcurrency = 5 // Reduce concurrency to test overloading workers
+	pinning.PinTimeout = time.Second * 5
 }
 
 func TestMain(m *testing.M) {
@@ -71,20 +74,19 @@ func TestMain(m *testing.M) {
 }
 
 func Test_ListPins(t *testing.T) {
-	queue.MaxConcurrency = 5 // Reduce concurrency to test overloading workers
-	pinning.PinTimeout = time.Second * 10
 	gw := newGateway(t)
 
-	numBatches := 10
-	batchSize := 20
+	numBatches := 1
+	batchSize := 20 // Must be an even number
 	total := numBatches * batchSize
 
 	files := make([]path.Resolved, total)
 	for i := 0; i < total; i++ {
-		files[i] = createIpfsFile(t, i%(batchSize/2) == 0) // Two-per batch should fail (blocks unavailable)
+		files[i] = createIpfsFile(t, i%(batchSize/2) == 0) // Two per batch should fail (blocks unavailable)
 		log.Debugf("created file %d", i)
 	}
 
+	// Blast a bunch of requests. Each batch hits a different bucket.
 	var done int32
 	clients := make([]*psc.Client, numBatches)
 	for b := 0; b < numBatches; b++ {
@@ -96,6 +98,7 @@ func Test_ListPins(t *testing.T) {
 				i := i
 				j := i + (b * batchSize)
 				f := files[j]
+				time.Sleep(time.Millisecond * 200)
 				eg.Go(func() error {
 					if gctx.Err() != nil {
 						return nil
@@ -111,12 +114,72 @@ func Test_ListPins(t *testing.T) {
 	}
 
 	time.Sleep(time.Second * 5) // Allow time for requests to be added
+	fmt.Println(batchSize)
 
 	// Test pagination
 	for _, c := range clients {
-		res, err := c.LsSync(context.Background(), psc.PinOpts.FilterStatus(statusAll...))
+		// Get oldest page
+		res1, err := c.LsSync(context.Background(),
+			psc.PinOpts.FilterStatus(statusAll...),
+			psc.PinOpts.Limit(batchSize/2),
+		)
 		require.NoError(t, err)
-		assert.Len(t, res, 10)
+		assert.Len(t, res1, batchSize/2)
+
+		// Get next oldest
+		res2, err := c.LsSync(context.Background(),
+			psc.PinOpts.FilterStatus(statusAll...),
+			psc.PinOpts.FilterAfter(res1[len(res1)-1].GetCreated()),
+			psc.PinOpts.Limit(batchSize/2),
+		)
+		require.NoError(t, err)
+		assert.Len(t, res2, batchSize/2)
+
+		// Ensure order is decending
+		fmt.Println("oldest")
+		//all := append(res1, res2...)
+		for i := 0; i < len(res1); i++ {
+			fmt.Println(ulid.Timestamp(res1[i].GetCreated()))
+			// assert.LessOrEqual(t, ulid.Timestamp(all[i].GetCreated()), ulid.Timestamp(all[i+1].GetCreated()))
+		}
+
+		fmt.Println("next oldest")
+		for i := 0; i < len(res2); i++ {
+			fmt.Println(ulid.Timestamp(res2[i].GetCreated()))
+		}
+
+		res3, err := c.LsSync(context.Background(),
+			psc.PinOpts.FilterStatus(statusAll...),
+			psc.PinOpts.FilterBefore(time.Now().Add(time.Hour)), // Far in the future
+			psc.PinOpts.Limit(batchSize/2),
+		)
+		require.NoError(t, err)
+		assert.Len(t, res3, batchSize/2)
+
+		fmt.Println("newest")
+		for i := 0; i < len(res3); i++ {
+			fmt.Println(ulid.Timestamp(res3[i].GetCreated()))
+		}
+
+		// Get next newest page
+		res4, err := c.LsSync(context.Background(),
+			psc.PinOpts.FilterStatus(statusAll...),
+			psc.PinOpts.FilterBefore(res3[len(res3)-1].GetCreated()),
+			psc.PinOpts.Limit(batchSize/2),
+		)
+		require.NoError(t, err)
+		//assert.Len(t, res4, batchSize/2)
+
+		fmt.Println("next newest")
+		for i := 0; i < len(res4); i++ {
+			fmt.Println(ulid.Timestamp(res4[i].GetCreated()))
+		}
+
+		// Ensure order is decending
+		//all = append(res3, res4...)
+		//for i := 0; i < len(all)-1; i++ {
+		//	assert.GreaterOrEqual(t, ulid.Timestamp(all[i].GetCreated()), ulid.Timestamp(all[i+1].GetCreated()))
+		//}
 	}
 
 	// Wait for all to complete
@@ -158,8 +221,6 @@ func Test_ListPins(t *testing.T) {
 }
 
 func Test_AddPin(t *testing.T) {
-	queue.MaxConcurrency = 100
-	pinning.PinTimeout = time.Second * 5
 	gw := newGateway(t)
 	c := newClient(t, gw)
 
@@ -172,7 +233,7 @@ func Test_AddPin(t *testing.T) {
 		assert.NotEmpty(t, res.GetCreated())
 		assert.Equal(t, psc.StatusQueued, res.GetStatus())
 
-		time.Sleep(time.Second * 10) // Allow for the pin to fail
+		time.Sleep(time.Second * 10) // Allow to fail
 
 		res, err = c.GetStatusByID(context.Background(), res.GetRequestId())
 		require.NoError(t, err)
@@ -188,13 +249,74 @@ func Test_AddPin(t *testing.T) {
 		assert.NotEmpty(t, res.GetCreated())
 		assert.Equal(t, psc.StatusQueued, res.GetStatus())
 
-		time.Sleep(time.Second * 10) // Allow for the pin to succeed
+		time.Sleep(time.Second * 10) // Allow to succeed
 
 		res, err = c.GetStatusByID(context.Background(), res.GetRequestId())
 		require.NoError(t, err)
 		assert.Equal(t, psc.StatusPinned, res.GetStatus())
 		assert.True(t, res.GetPin().GetCid().Equals(folder.Cid()))
 	})
+}
+
+func Test_GetPin(t *testing.T) {
+	gw := newGateway(t)
+	c := newClient(t, gw)
+
+	t.Run("get nonexistent pin should fail", func(t *testing.T) {
+		t.Parallel()
+		_, err := c.GetStatusByID(context.Background(), ulid.MustNew(123, rand.Reader).String())
+		require.Error(t, err)
+	})
+
+	t.Run("get bad pin should report correct status at each stage", func(t *testing.T) {
+		t.Parallel()
+		folder := createIpfsFolder(t, true)
+		res, err := c.Add(context.Background(), folder.Cid(), psc.PinOpts.WithOrigins(origins...))
+		require.NoError(t, err)
+		assert.Equal(t, psc.StatusQueued, res.GetStatus())
+
+		assert.Eventually(t, func() bool {
+			res, err = c.GetStatusByID(context.Background(), res.GetRequestId())
+			require.NoError(t, err)
+			return res.GetStatus() == psc.StatusPinning
+		}, time.Second*10, time.Millisecond*200)
+
+		assert.Eventually(t, func() bool {
+			res, err = c.GetStatusByID(context.Background(), res.GetRequestId())
+			require.NoError(t, err)
+			return res.GetStatus() == psc.StatusFailed
+		}, time.Second*10, time.Millisecond*200)
+	})
+
+	t.Run("get good pin should report correct status at each stage", func(t *testing.T) {
+		t.Parallel()
+		folder := createIpfsFolder(t, false)
+		res, err := c.Add(context.Background(), folder.Cid(), psc.PinOpts.WithOrigins(origins...))
+		require.NoError(t, err)
+		assert.Equal(t, psc.StatusQueued, res.GetStatus())
+
+		assert.Eventually(t, func() bool {
+			res, err = c.GetStatusByID(context.Background(), res.GetRequestId())
+			require.NoError(t, err)
+			return res.GetStatus() == psc.StatusPinning
+		}, time.Second*10, time.Millisecond*200)
+
+		assert.Eventually(t, func() bool {
+			res, err = c.GetStatusByID(context.Background(), res.GetRequestId())
+			require.NoError(t, err)
+			return res.GetStatus() == psc.StatusPinned
+		}, time.Second*10, time.Millisecond*200)
+	})
+}
+
+func Test_ReplacePin(t *testing.T) {
+	//gw := newGateway(t)
+	//c := newClient(t, gw)
+}
+
+func Test_RemovePin(t *testing.T) {
+	//gw := newGateway(t)
+	//c := newClient(t, gw)
 }
 
 func newGateway(t *testing.T) *Gateway {
@@ -214,9 +336,10 @@ func newGateway(t *testing.T) *Gateway {
 
 	dir, err := ioutil.TempDir("", "")
 	require.NoError(t, err)
-	pss, err := util.NewBadgerDatastore(dir, "pinq", false)
+	pss, err := util.NewBadgerDatastore(dir, "pinq")
 	require.NoError(t, err)
-	ps := pinning.NewService(lib, pss)
+	ps, err := pinning.NewService(lib, pss)
+	require.NoError(t, err)
 
 	listenPort, err := freeport.GetFreePort()
 	require.NoError(t, err)

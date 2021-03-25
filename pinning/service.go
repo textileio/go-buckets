@@ -42,10 +42,14 @@ type Service struct {
 }
 
 // NewService returns a new pinning Service.
-func NewService(lib *buckets.Buckets, store kt.TxnDatastoreExtended) *Service {
+func NewService(lib *buckets.Buckets, store kt.TxnDatastoreExtended) (*Service, error) {
 	s := &Service{lib: lib}
-	s.queue = q.NewQueue(store, s.handleRequest)
-	return s
+	queue, err := q.NewQueue(store, s.handleRequest)
+	if err != nil {
+		return nil, fmt.Errorf("creating queue: %v", err)
+	}
+	s.queue = queue
+	return s, nil
 }
 
 // Close the Service.
@@ -58,8 +62,8 @@ func (s *Service) ListPins(
 	ctx context.Context,
 	thread core.ID,
 	key string,
-	query q.Query,
 	identity did.Token,
+	query q.Query,
 ) ([]openapi.PinStatus, error) {
 	// Ensure bucket is readable by identity
 	if _, err := s.lib.Get(ctx, thread, key, identity); err != nil {
@@ -80,33 +84,28 @@ func (s *Service) AddPin(
 	ctx context.Context,
 	thread core.ID,
 	key string,
-	pin openapi.Pin,
 	identity did.Token,
+	pin openapi.Pin,
 ) (*openapi.PinStatus, error) {
 	// Verify pin cid
 	if _, err := c.Decode(pin.Cid); err != nil {
 		return nil, fmt.Errorf("decoding pin cid: %v", err)
 	}
 
-	status := openapi.PinStatus{
-		Requestid: q.NewID(),
-		Status:    openapi.QUEUED,
-		Created:   time.Now(),
-		Pin:       pin,
-	}
-
 	// Enqueue request
-	if err := s.queue.AddRequest(q.Request{
-		PinStatus: status,
-		Thread:    thread,
-		Key:       key,
-		Identity:  identity,
-	}); err != nil {
+	r, err := s.queue.AddRequest(q.RequestParams{
+		Pin:      pin,
+		Time:     time.Now(),
+		Thread:   thread,
+		Key:      key,
+		Identity: identity,
+	})
+	if err != nil {
 		return nil, fmt.Errorf("adding request: %v", err)
 	}
 
-	log.Debugf("added request %s in %s", status.Requestid, key)
-	return &status, nil
+	log.Debugf("added request %s in %s", r.Requestid, key)
+	return r, nil
 }
 
 // handleRequest attempts to pin the request Cid to the bucket path (request ID).
@@ -187,8 +186,8 @@ func (s *Service) GetPin(
 	ctx context.Context,
 	thread core.ID,
 	key string,
-	id string,
 	identity did.Token,
+	id string,
 ) (*openapi.PinStatus, error) {
 	// Ensure bucket is readable by identity
 	if _, err := s.lib.Get(ctx, thread, key, identity); err != nil {
@@ -211,36 +210,34 @@ func (s *Service) ReplacePin(
 	ctx context.Context,
 	thread core.ID,
 	key string,
+	identity did.Token,
 	id string,
 	pin openapi.Pin,
-	identity did.Token,
 ) (*openapi.PinStatus, error) {
 	// Verify pin cid
 	if _, err := c.Decode(pin.Cid); err != nil {
 		return nil, fmt.Errorf("decoding pin cid: %v", err)
 	}
 
-	status := openapi.PinStatus{
-		Requestid: id,
-		Status:    openapi.QUEUED,
-		Created:   time.Now(),
-		Pin:       pin,
-	}
+	//status := openapi.PinStatus{
+	//	Requestid: id,
+	//	Status:    openapi.QUEUED,
+	//	Pin:       pin,
+	//}
 
 	// Remove from queues.
 	if err := s.queue.RemoveRequest(key, id); err != nil {
 		return nil, fmt.Errorf("removing request: %v", err)
 	}
 
-	// Re-enqueue request
-	if err := s.queue.AddRequest(q.Request{
-		PinStatus: status,
-		Thread:    thread,
-		Key:       key,
-		Identity:  identity,
-	}); err != nil {
-		return nil, fmt.Errorf("adding request: %v", err)
-	}
+	//// Re-enqueue request
+	//r, err := s.queue.AddRequest(q.RequestParams{
+	//	Pin: pin,
+	//	Time: time.Now(),
+	//}thread, key, identity, pin, time.Now())
+	//if err != nil {
+	//	return nil, fmt.Errorf("adding request: %v", err)
+	//}
 
 	log.Debugf("replaced request %s in %s", id, key)
 	return nil, nil
@@ -251,8 +248,8 @@ func (s *Service) RemovePin(
 	ctx context.Context,
 	thread core.ID,
 	key string,
-	id string,
 	identity did.Token,
+	id string,
 ) error {
 	// Remove from bucket. This will block if the request is pinning.
 	if _, _, err := s.lib.RemovePath(

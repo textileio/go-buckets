@@ -1,7 +1,7 @@
 version: "3"
 services:
   threads:
-    image: textile/go-threads:1ef50f7
+    image: textile/go-threads:f604018-m1
     environment:
       - THREADS_APIADDR=/ip4/0.0.0.0/tcp/5000
       - THREADS_APIPROXYADDR=/ip4/0.0.0.0/tcp/5050

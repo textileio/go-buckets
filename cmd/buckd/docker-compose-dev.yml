@@ -35,7 +35,7 @@ services:
       - threads
       - ipfs
   threads:
-    image: textile/go-threads:1ef50f7
+    image: textile/go-threads:f604018-m1
     restart: always
     volumes:
       - "${REPO_PATH}/threads:/data/threads"

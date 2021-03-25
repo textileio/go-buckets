@@ -22,7 +22,7 @@ import (
 	"github.com/textileio/go-buckets/gateway"
 	ipns "github.com/textileio/go-buckets/ipns"
 	"github.com/textileio/go-buckets/pinning"
-	badger "github.com/textileio/go-ds-badger"
+	badger "github.com/textileio/go-ds-badger3"
 	mongods "github.com/textileio/go-ds-mongo"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
@@ -352,7 +352,8 @@ var rootCmd = &cobra.Command{
 		cmd.ErrCheck(err)
 
 		// Configure gateway
-		ps := pinning.NewService(lib, pss)
+		ps, err := pinning.NewService(lib, pss)
+		cmd.ErrCheck(err)
 		gw, err := gateway.NewGateway(lib, ipfs, ipnsm, ps, gateway.Config{
 			Addr:       addrGateway,
 			URL:        gatewayUrl,
