@@ -98,7 +98,7 @@ func Test_ListPins(t *testing.T) {
 				i := i
 				j := i + (b * batchSize)
 				f := files[j]
-				time.Sleep(time.Millisecond * 200)
+				time.Sleep(time.Second)
 				eg.Go(func() error {
 					if gctx.Err() != nil {
 						return nil
@@ -113,8 +113,7 @@ func Test_ListPins(t *testing.T) {
 		}(c, b)
 	}
 
-	time.Sleep(time.Second * 5) // Allow time for requests to be added
-	fmt.Println(batchSize)
+	time.Sleep(time.Second * 25) // Allow time for requests to be added
 
 	// Test pagination
 	for _, c := range clients {
@@ -135,17 +134,10 @@ func Test_ListPins(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, res2, batchSize/2)
 
-		// Ensure order is decending
-		fmt.Println("oldest")
-		//all := append(res1, res2...)
-		for i := 0; i < len(res1); i++ {
-			fmt.Println(ulid.Timestamp(res1[i].GetCreated()))
-			// assert.LessOrEqual(t, ulid.Timestamp(all[i].GetCreated()), ulid.Timestamp(all[i+1].GetCreated()))
-		}
-
-		fmt.Println("next oldest")
-		for i := 0; i < len(res2); i++ {
-			fmt.Println(ulid.Timestamp(res2[i].GetCreated()))
+		// Ensure order is ascending
+		all := append(res1, res2...)
+		for i := 0; i < len(res1)-1; i++ {
+			assert.Less(t, ulid.Timestamp(all[i].GetCreated()), ulid.Timestamp(all[i+1].GetCreated()))
 		}
 
 		res3, err := c.LsSync(context.Background(),
@@ -156,11 +148,6 @@ func Test_ListPins(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, res3, batchSize/2)
 
-		fmt.Println("newest")
-		for i := 0; i < len(res3); i++ {
-			fmt.Println(ulid.Timestamp(res3[i].GetCreated()))
-		}
-
 		// Get next newest page
 		res4, err := c.LsSync(context.Background(),
 			psc.PinOpts.FilterStatus(statusAll...),
@@ -168,18 +155,13 @@ func Test_ListPins(t *testing.T) {
 			psc.PinOpts.Limit(batchSize/2),
 		)
 		require.NoError(t, err)
-		//assert.Len(t, res4, batchSize/2)
-
-		fmt.Println("next newest")
-		for i := 0; i < len(res4); i++ {
-			fmt.Println(ulid.Timestamp(res4[i].GetCreated()))
-		}
+		assert.Len(t, res4, batchSize/2)
 
 		// Ensure order is decending
-		//all = append(res3, res4...)
-		//for i := 0; i < len(all)-1; i++ {
-		//	assert.GreaterOrEqual(t, ulid.Timestamp(all[i].GetCreated()), ulid.Timestamp(all[i+1].GetCreated()))
-		//}
+		all = append(res3, res4...)
+		for i := 0; i < len(all)-1; i++ {
+			assert.Greater(t, ulid.Timestamp(all[i].GetCreated()), ulid.Timestamp(all[i+1].GetCreated()))
+		}
 	}
 
 	// Wait for all to complete

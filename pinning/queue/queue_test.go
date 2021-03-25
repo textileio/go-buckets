@@ -26,10 +26,24 @@ func init() {
 }
 
 func TestQueue_NewID(t *testing.T) {
-	//assert.NotEmpty(t, NewID())
+	t.Parallel()
+	q := newQueue(t)
+
+	// Ensure monotonic
+	var last string
+	for i := 0; i < 10000; i++ {
+		id, err := q.NewID(time.Now())
+		require.NoError(t, err)
+
+		if i > 0 {
+			assert.Greater(t, id, last)
+		}
+		last = id
+	}
 }
 
 func TestQueue_ListRequests(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 
 	limit := 100
@@ -37,7 +51,7 @@ func TestQueue_ListRequests(t *testing.T) {
 	key := newBucketkey(t)
 	ids := make([]string, limit)
 	for i := 0; i < limit; i++ {
-		now = now.Add(time.Second)
+		now = now.Add(time.Second) // Pagination is not possible at sub second resolution due limits in the API spec
 		p := newParams(key, now, time.Millisecond, succeed)
 		r, err := q.AddRequest(p)
 		require.NoError(t, err)
@@ -52,7 +66,7 @@ func TestQueue_ListRequests(t *testing.T) {
 	assert.Len(t, l, 0)
 
 	// Using before and after should error
-	l, err = q.ListRequests(key, Query{Before: "foo", After: "bar"})
+	l, err = q.ListRequests(key, Query{Before: time.Now(), After: time.Now()})
 	require.Error(t, err)
 
 	// Empty query, should return oldest 10 records
@@ -63,14 +77,16 @@ func TestQueue_ListRequests(t *testing.T) {
 	assert.Equal(t, ids[9], l[9].Requestid)
 
 	// Get next page, should return next 10 older records
-	l, err = q.ListRequests(key, Query{After: l[len(l)-1].Requestid})
+	after := time.Unix(l[len(l)-1].Created.Unix(), 0) // limit to second resolution
+	l, err = q.ListRequests(key, Query{After: after})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
 	assert.Equal(t, ids[10], l[0].Requestid)
 	assert.Equal(t, ids[19], l[9].Requestid)
 
 	// Get previous page, should return the first page in reverse order
-	l, err = q.ListRequests(key, Query{Before: l[0].Requestid})
+	before := time.Unix(l[0].Created.Unix(), 0)
+	l, err = q.ListRequests(key, Query{Before: before})
 	require.NoError(t, err)
 	assert.Len(t, l, 10)
 	assert.Equal(t, ids[0], l[9].Requestid)
@@ -128,6 +144,7 @@ func TestQueue_ListRequests(t *testing.T) {
 }
 
 func TestQueue_AddRequest(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 
 	p := newParams(newBucketkey(t), time.Now(), time.Millisecond, succeed)
@@ -143,6 +160,7 @@ func TestQueue_AddRequest(t *testing.T) {
 }
 
 func TestQueue_RemoveRequest(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 
 	p := newParams(newBucketkey(t), time.Now(), time.Millisecond, succeed)
@@ -166,6 +184,7 @@ func TestQueue_RemoveRequest(t *testing.T) {
 }
 
 func TestQueueProcessing(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 
 	limit := 500

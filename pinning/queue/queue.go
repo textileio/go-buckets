@@ -8,11 +8,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/gob"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	c "github.com/ipfs/go-cid"
@@ -41,9 +41,6 @@ var (
 
 	// ErrInProgress indicates the request is in progress and cannot be altered.
 	ErrInProgress = errors.New("request in progress")
-
-	// dsSeedKey stores a seed used by to ensure monotonic sort order within the same millisecond
-	dsSeedKey = ds.NewKey("/seed")
 
 	// dsQueuePrefix is the prefix for global time-ordered keys used internally for processing.
 	// Structure: /queue/<requestid>
@@ -81,8 +78,8 @@ type Query struct {
 	Name     string                       // @todo
 	Match    openapi.TextMatchingStrategy // @todo
 	Statuses []openapi.Status
-	Before   string // ulid.ULID string
-	After    string // ulid.ULID string
+	Before   time.Time
+	After    time.Time
 	Limit    int
 	Meta     map[string]string // @todo
 }
@@ -107,12 +104,14 @@ type Queue struct {
 	store kt.TxnDatastoreExtended
 
 	handler Handler
-
-	jobCh  chan Request
-	doneCh chan struct{}
+	jobCh   chan Request
+	doneCh  chan struct{}
+	entropy *ulid.MonotonicEntropy
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	lk sync.Mutex
 }
 
 func NewQueue(store kt.TxnDatastoreExtended, handler Handler) (*Queue, error) {
@@ -141,14 +140,21 @@ func (q *Queue) Close() error {
 }
 
 func (q *Queue) NewID(t time.Time) (string, error) {
-	seed, err := q.nextSeed()
-	if err != nil {
-		return "", fmt.Errorf("getting next seed: %v", err)
+	q.lk.Lock() // entropy is not safe for concurrent use
+
+	if q.entropy == nil {
+		q.entropy = ulid.Monotonic(rand.Reader, 0)
 	}
-
-	entropy := ulid.Monotonic(rand.Reader, seed)
-	id := ulid.MustNew(ulid.Timestamp(t.UTC()), entropy)
-
+	id, err := ulid.New(ulid.Timestamp(t.UTC()), q.entropy)
+	if errors.Is(err, ulid.ErrMonotonicOverflow) {
+		q.entropy = nil
+		q.lk.Unlock()
+		return q.NewID(t)
+	} else if err != nil {
+		q.lk.Unlock()
+		return "", fmt.Errorf("generating requestid: %v", err)
+	}
+	q.lk.Unlock()
 	return strings.ToLower(id.String()), nil
 }
 
@@ -165,15 +171,14 @@ func (f *statusFilter) Filter(e dsq.Entry) bool {
 	return false
 }
 
-// ListRequests lists request for key by applying a Query.
-// This is optimize for single-status queries (the default query is for only openapi.PINNED requests).
+// ListRequests lists requests for key by applying a Query.
 func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, error) {
 	query = query.setDefaults()
-	if len(query.Before) != 0 && len(query.After) != 0 {
+	if !query.Before.IsZero() && !query.After.IsZero() {
 		return nil, fmt.Errorf("before and after cannot be used together")
 	}
 	var order dsq.Order = dsq.OrderByKey{}
-	if len(query.Before) != 0 {
+	if !query.Before.IsZero() {
 		order = dsq.OrderByKeyDescending{}
 	}
 
@@ -181,17 +186,25 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 		seek, seekKey string
 		filters       []dsq.Filter
 		limit         = query.Limit
+		err           error
 	)
-	if len(query.Before) != 0 {
-		seek = query.Before
-	} else if len(query.After) != 0 {
-		seek = query.After
+
+	if !query.Before.IsZero() {
+		seek, err = q.NewID(query.Before)
+		if err != nil {
+			return nil, fmt.Errorf("getting 'before' id: %v", err)
+		}
+	} else if !query.After.IsZero() {
+		// Bump up to next second since 'after' has been rounded down due to limited resolution
+		seek, err = q.NewID(query.After.Add(time.Second))
+		if err != nil {
+			return nil, fmt.Errorf("getting 'before' id: %v", err)
+		}
 	}
 	if len(seek) != 0 {
 		seekKey = getBucketKey(key, seek).String()
-		limit++ // Bump limit in case seek matches an element
 	}
-	if len(query.Statuses) > 0 {
+	if len(query.Statuses) > 0 && len(query.Statuses) < 4 {
 		filters = append(filters, &statusFilter{
 			valid: query.Statuses,
 		})
@@ -223,20 +236,10 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 		reqs = append(reqs, r.PinStatus)
 	}
 
-	if len(seek) != 0 && len(reqs) > 0 {
-		// Remove seek from tip if it matches the first record
-		if seek == reqs[0].Requestid {
-			reqs = reqs[1:]
-		} else if len(reqs) == limit { // All elements are valid, remove the extra element
-			reqs = reqs[:len(reqs)-1]
-		}
-	}
-
 	return reqs, nil
 }
 
 func (q *Queue) AddRequest(params RequestParams) (*openapi.PinStatus, error) {
-	// The requestids (ulids) only encode milliseconds
 	id, err := q.NewID(params.Time)
 	if err != nil {
 		return nil, fmt.Errorf("creating request id: %v", err)
@@ -304,7 +307,6 @@ func (q *Queue) RemoveRequest(key, id string) error {
 	}
 
 	// Remove all possible bucket keys
-
 	if err := txn.Delete(bk.ChildString(string(openapi.QUEUED))); err != nil {
 		return fmt.Errorf("deleting bucket key (queued): %v", err)
 	}
@@ -496,44 +498,8 @@ func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	return nil
 }
 
-// nextSeed get the next requestid seed used to generate a new monotonically increasing requestid.
-func (q *Queue) nextSeed() (uint64, error) {
-	txn, err := q.store.NewTransaction(false)
-	if err != nil {
-		return 0, fmt.Errorf("creating txn: %v", err)
-	}
-	defer txn.Discard()
-
-	var seed uint64
-	val, err := txn.Get(dsSeedKey)
-	if err != nil && !errors.Is(err, ds.ErrNotFound) {
-		return 0, fmt.Errorf("reading seed: %v", err)
-	}
-	if val != nil {
-		seed = binary.LittleEndian.Uint64(val) + 1
-	}
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, seed)
-	if err := txn.Put(dsSeedKey, b); err != nil {
-		return 0, fmt.Errorf("writing seed: %v", err)
-	}
-	if err := txn.Commit(); err != nil {
-		return 0, fmt.Errorf("committing txn: %v", err)
-	}
-	return seed, nil
-}
-
 func getBucketKey(key, id string) ds.Key {
 	return dsBucketPrefix.ChildString(key).ChildString(id)
-}
-
-func writeSeed(txn ds.Txn, v uint64) error {
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, v)
-	if err := txn.Put(dsSeedKey, b); err != nil {
-		return fmt.Errorf("writing seed: %v", err)
-	}
-	return nil
 }
 
 func encode(r Request) ([]byte, error) {

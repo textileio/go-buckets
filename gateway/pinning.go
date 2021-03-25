@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	c "github.com/ipfs/go-cid"
@@ -61,7 +62,7 @@ func oapiQueryToQuery(q openapi.Query) (queue.Query, error) {
 	var (
 		cids          []c.Cid
 		statuses      []openapi.Status
-		before, after string
+		before, after time.Time
 		limit         int
 		meta          map[string]string
 	)
@@ -93,10 +94,10 @@ func oapiQueryToQuery(q openapi.Query) (queue.Query, error) {
 		}
 	}
 	if q.Before != nil {
-		before = queue.NewIDFromTime(*q.Before)
+		before = *q.Before
 	}
 	if q.After != nil {
-		after = queue.NewIDFromTime(*q.After)
+		after = *q.After
 	}
 	if q.Limit != nil {
 		limit = int(*q.Limit)
