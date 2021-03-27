@@ -76,7 +76,7 @@ func TestMain(m *testing.M) {
 func Test_ListPins(t *testing.T) {
 	gw := newGateway(t)
 
-	numBatches := 1
+	numBatches := 5
 	batchSize := 20 // Must be an even number
 	total := numBatches * batchSize
 

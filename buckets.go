@@ -1,7 +1,6 @@
 package buckets
 
-// @todo: Validate all thread IDs
-// @todo: Validate all identities
+// @todo: Add doc strings
 // @todo: Clean up error messages
 
 import (
@@ -118,19 +117,6 @@ func (t *Txn) Close() error {
 	return nil
 }
 
-// NewTxn returns a new Txn for bucket key.
-func (b *Buckets) NewTxn(thread core.ID, key string, identity did.Token) *Txn {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
-	return &Txn{
-		b:        b,
-		thread:   thread,
-		key:      key,
-		identity: identity,
-		lock:     lk,
-	}
-}
-
 // NewBuckets returns a new buckets library.
 func NewBuckets(
 	net *nc.Client,
@@ -168,7 +154,26 @@ func (b *Buckets) DB() *dbc.Client {
 	return b.db
 }
 
+// NewTxn returns a new Txn for bucket key.
+func (b *Buckets) NewTxn(thread core.ID, key string, identity did.Token) (*Txn, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
+	lk := b.locks.Get(lock(key))
+	lk.Acquire()
+	return &Txn{
+		b:        b,
+		thread:   thread,
+		key:      key,
+		identity: identity,
+		lock:     lk,
+	}, nil
+}
+
 func (b *Buckets) Get(ctx context.Context, thread core.ID, key string, identity did.Token) (*Bucket, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
 		return nil, err
@@ -184,6 +189,9 @@ func (b *Buckets) GetLinks(
 	identity did.Token,
 	pth string,
 ) (links Links, err error) {
+	if err := thread.Validate(); err != nil {
+		return links, fmt.Errorf("invalid thread id: %v", err)
+	}
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
 		return links, err
@@ -240,6 +248,9 @@ func (b *Buckets) GetLinksForBucket(
 }
 
 func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) ([]Bucket, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	list, err := b.c.List(ctx, thread, &db.Query{}, &collection.Bucket{}, collection.WithIdentity(identity))
 	if err != nil {
 		return nil, fmt.Errorf("listing buckets: %v", err)
@@ -256,7 +267,10 @@ func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) 
 }
 
 func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identity did.Token) (int64, error) {
-	txn := b.NewTxn(thread, key, identity)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		return 0, err
+	}
 	defer txn.Close()
 	return txn.Remove(ctx)
 }
@@ -312,4 +326,13 @@ func instanceToBucket(thread core.ID, instance *collection.Bucket) *Bucket {
 		Thread: thread,
 		Bucket: *instance,
 	}
+}
+
+func isPathNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "could not resolve path") ||
+		strings.Contains(msg, "no link named")
 }

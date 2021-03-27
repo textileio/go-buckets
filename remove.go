@@ -19,7 +19,10 @@ func (b *Buckets) RemovePath(
 	root path.Resolved,
 	pth string,
 ) (int64, *Bucket, error) {
-	txn := b.NewTxn(thread, key, identity)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		return 0, nil, err
+	}
 	defer txn.Close()
 	return txn.RemovePath(ctx, root, pth)
 }

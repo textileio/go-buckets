@@ -23,7 +23,10 @@ func (b *Buckets) PushPathAccessRoles(
 	pth string,
 	roles map[did.DID]collection.Role,
 ) (int64, *Bucket, error) {
-	txn := b.NewTxn(thread, key, identity)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		return 0, nil, err
+	}
 	defer txn.Close()
 	return txn.PushPathAccessRoles(ctx, root, pth, roles)
 }
@@ -157,6 +160,9 @@ func (b *Buckets) PullPathAccessRoles(
 	identity did.Token,
 	pth string,
 ) (map[did.DID]collection.Role, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	pth, err := parsePath(pth)
 	if err != nil {
 		return nil, err
@@ -172,4 +178,54 @@ func (b *Buckets) PullPathAccessRoles(
 
 	log.Debugf("pulled access roles for %s in %s", pth, key)
 	return md.Roles, nil
+}
+
+func (b *Buckets) IsReadablePath(
+	ctx context.Context,
+	thread core.ID,
+	key string,
+	identity did.Token,
+	pth string,
+) (bool, error) {
+	if err := thread.Validate(); err != nil {
+		return false, fmt.Errorf("invalid thread id: %v", err)
+	}
+	pth, err := parsePath(pth)
+	if err != nil {
+		return false, err
+	}
+	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+	if err != nil {
+		return false, err
+	}
+	_, id, err := core.GetIdentityDID(identity)
+	if err != nil {
+		return false, err
+	}
+	return instance.IsReadablePath(pth, id), nil
+}
+
+func (b *Buckets) IsWritablePath(
+	ctx context.Context,
+	thread core.ID,
+	key string,
+	identity did.Token,
+	pth string,
+) (bool, error) {
+	if err := thread.Validate(); err != nil {
+		return false, fmt.Errorf("invalid thread id: %v", err)
+	}
+	pth, err := parsePath(pth)
+	if err != nil {
+		return false, err
+	}
+	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+	if err != nil {
+		return false, err
+	}
+	_, id, err := core.GetIdentityDID(identity)
+	if err != nil {
+		return false, err
+	}
+	return instance.IsWritablePath(pth, id), nil
 }

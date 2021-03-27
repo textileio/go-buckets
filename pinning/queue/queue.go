@@ -1,7 +1,6 @@
 package queue
 
 // @todo: Add doc strings
-// @todo: Use badger v2
 // @todo: Batch jobs by key, then handler can directly fetch cids and use PushPaths to save bucket writes
 
 import (
@@ -15,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	c "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	dsq "github.com/ipfs/go-datastore/query"
 	logging "github.com/ipfs/go-log/v2"
@@ -46,9 +44,9 @@ var (
 	// Structure: /queue/<requestid>
 	dsQueuePrefix = ds.NewKey("/queue")
 
-	// dsBucketPrefix is the prefix for bucket-grouped time-ordered keys used to list requests.
-	// Structure: /bucket/<bucketkey>/<requestid>/<status>
-	dsBucketPrefix = ds.NewKey("/bucket")
+	// dsBucketPrefix is the prefix for grouped time-ordered keys used to list requests.
+	// Structure: /group/<groupkey>/<requestid>
+	dsBucketPrefix = ds.NewKey("/group")
 )
 
 const (
@@ -62,6 +60,9 @@ type Request struct {
 	Thread   core.ID
 	Key      string
 	Identity did.Token
+
+	Replace bool
+	Remove  bool
 }
 
 type RequestParams struct {
@@ -74,26 +75,29 @@ type RequestParams struct {
 }
 
 type Query struct {
-	Cid      []c.Cid                      // @todo
-	Name     string                       // @todo
-	Match    openapi.TextMatchingStrategy // @todo
+	Cids     []string
+	Name     string
+	Match    openapi.TextMatchingStrategy
 	Statuses []openapi.Status
 	Before   time.Time
 	After    time.Time
 	Limit    int
-	Meta     map[string]string // @todo
+	Meta     map[string]string
 }
 
 func (q Query) setDefaults() Query {
-	if len(q.Statuses) == 0 {
-		q.Statuses = []openapi.Status{openapi.PINNED}
-	}
 	if q.Limit == -1 {
 		q.Limit = maxListLimit
 	} else if q.Limit <= 0 {
 		q.Limit = defaultListLimit
 	} else if q.Limit > maxListLimit {
 		q.Limit = maxListLimit
+	}
+	if q.Meta == nil {
+		q.Meta = make(map[string]string)
+	}
+	if len(q.Match) == 0 {
+		q.Match = openapi.EXACT
 	}
 	return q
 }
@@ -158,17 +162,93 @@ func (q *Queue) NewID(t time.Time) (string, error) {
 	return strings.ToLower(id.String()), nil
 }
 
-type statusFilter struct {
-	valid []openapi.Status
+type cidFilter struct {
+	ok []string
 }
 
-func (f *statusFilter) Filter(e dsq.Entry) bool {
-	for _, s := range f.valid {
-		if strings.HasSuffix(e.Key, string(s)) {
+func (f *cidFilter) Filter(e dsq.Entry) bool {
+	r, err := decode(e.Value)
+	if err != nil {
+		log.Errorf("error decoding entry: %v", err)
+		return false
+	}
+	for _, ok := range f.ok {
+		if r.Pin.Cid == ok {
 			return true
 		}
 	}
 	return false
+}
+
+type nameFilter struct {
+	name  string
+	match openapi.TextMatchingStrategy
+}
+
+func (f *nameFilter) Filter(e dsq.Entry) bool {
+	r, err := decode(e.Value)
+	if err != nil {
+		log.Errorf("error decoding entry: %v", err)
+		return false
+	}
+	switch f.match {
+	case openapi.EXACT:
+		return r.Pin.Name == f.name
+	case openapi.IEXACT:
+		return strings.ToLower(r.Pin.Name) == strings.ToLower(f.name)
+	case openapi.PARTIAL:
+		return strings.Contains(r.Pin.Name, f.name)
+	case openapi.IPARTIAL:
+		return strings.Contains(strings.ToLower(r.Pin.Name), strings.ToLower(f.name))
+	default:
+		return false
+	}
+}
+
+type statusFilter struct {
+	ok []openapi.Status
+}
+
+func (f *statusFilter) Filter(e dsq.Entry) bool {
+	r, err := decode(e.Value)
+	if err != nil {
+		log.Errorf("error decoding entry: %v", err)
+		return false
+	}
+	for _, ok := range f.ok {
+		if r.Status == ok {
+			return true
+		}
+	}
+	return false
+}
+
+type metaFilter struct {
+	meta map[string]string
+}
+
+func (f *metaFilter) Filter(e dsq.Entry) bool {
+	r, err := decode(e.Value)
+	if err != nil {
+		log.Errorf("error decoding entry: %v", err)
+		return false
+	}
+	var match bool
+loop:
+	for fk, fv := range f.meta {
+		for k, v := range r.Pin.Meta {
+			if k == fk {
+				if v == fv {
+					match = true
+					continue loop // So far so good, check next filter
+				} else {
+					return false // Values don't match, we're done
+				}
+			}
+		}
+		return false // Key not found, we're done
+	}
+	return match
 }
 
 // ListRequests lists requests for key by applying a Query.
@@ -177,36 +257,53 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 	if !query.Before.IsZero() && !query.After.IsZero() {
 		return nil, fmt.Errorf("before and after cannot be used together")
 	}
-	var order dsq.Order = dsq.OrderByKey{}
-	if !query.Before.IsZero() {
-		order = dsq.OrderByKeyDescending{}
-	}
 
 	var (
+		order         dsq.Order = dsq.OrderByKeyDescending{}
 		seek, seekKey string
 		filters       []dsq.Filter
 		limit         = query.Limit
 		err           error
 	)
 
-	if !query.Before.IsZero() {
-		seek, err = q.NewID(query.Before)
-		if err != nil {
-			return nil, fmt.Errorf("getting 'before' id: %v", err)
-		}
-	} else if !query.After.IsZero() {
+	if !query.After.IsZero() {
+		order = dsq.OrderByKey{}
 		// Bump up to next second since 'after' has been rounded down due to limited resolution
 		seek, err = q.NewID(query.After.Add(time.Second))
 		if err != nil {
-			return nil, fmt.Errorf("getting 'before' id: %v", err)
+			return nil, fmt.Errorf("getting 'after' id: %v", err)
+		}
+	} else {
+		if query.Before.IsZero() {
+			seek = strings.ToLower(ulid.MustNew(ulid.MaxTime(), nil).String())
+		} else {
+			seek, err = q.NewID(query.Before)
+			if err != nil {
+				return nil, fmt.Errorf("getting 'before' id: %v", err)
+			}
 		}
 	}
-	if len(seek) != 0 {
-		seekKey = getBucketKey(key, seek).String()
+	seekKey = getBucketKey(key, seek).String()
+
+	if len(query.Cids) > 0 {
+		filters = append(filters, &cidFilter{
+			ok: query.Cids,
+		})
 	}
-	if len(query.Statuses) > 0 && len(query.Statuses) < 4 {
+	if len(query.Name) > 0 {
+		filters = append(filters, &nameFilter{
+			name:  query.Name,
+			match: query.Match,
+		})
+	}
+	if len(query.Statuses) > 0 {
 		filters = append(filters, &statusFilter{
-			valid: query.Statuses,
+			ok: query.Statuses,
+		})
+	}
+	if len(query.Meta) > 0 {
+		filters = append(filters, &metaFilter{
+			meta: query.Meta,
 		})
 	}
 
@@ -263,62 +360,58 @@ func (q *Queue) AddRequest(params RequestParams) (*openapi.PinStatus, error) {
 }
 
 func (q *Queue) GetRequest(key, id string) (*openapi.PinStatus, error) {
-	results, err := q.store.Query(dsq.Query{
-		Prefix: getBucketKey(key, id).String(),
-		Limit:  1,
-	})
+	r, err := q.getRequest(q.store, key, id)
 	if err != nil {
-		return nil, fmt.Errorf("finding request: %v", err)
+		return nil, err
 	}
-	defer results.Close()
-	for res := range results.Next() {
-		if res.Error != nil {
-			return nil, fmt.Errorf("getting next result: %v", res.Error)
-		}
-		r, err := decode(res.Value)
-		if err != nil {
-			return nil, fmt.Errorf("decoding request: %v", err)
-		}
-		return &r.PinStatus, nil
+	return &r.PinStatus, err
+}
+
+func (q *Queue) getRequest(reader ds.Read, key, id string) (*Request, error) {
+	val, err := reader.Get(getBucketKey(key, id))
+	if errors.Is(err, ds.ErrNotFound) {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("getting group key: %v", err)
 	}
-	return nil, ErrNotFound
+	r, err := decode(val)
+	if err != nil {
+		return nil, fmt.Errorf("decoding request: %v", err)
+	}
+	return &r, nil
+}
+
+func (q *Queue) ReplaceRequest(key, id string, pin openapi.Pin) (*openapi.PinStatus, error) {
+	r, err := q.dequeue(key, id)
+	if err != nil {
+		return nil, fmt.Errorf("dequeueing request")
+	}
+
+	// Mark for replacement
+	r.Replace = true
+	r.Pin = pin
+	r.Status = openapi.QUEUED
+
+	// Re-enqueue
+	if err := q.enqueue(*r, true); err != nil {
+		return nil, fmt.Errorf("re-enqueueing request: %v", err)
+	}
+	return &r.PinStatus, nil
 }
 
 func (q *Queue) RemoveRequest(key, id string) error {
-	txn, err := q.store.NewTransaction(false)
+	r, err := q.dequeue(key, id)
 	if err != nil {
-		return fmt.Errorf("creating txn: %v", err)
-	}
-	defer txn.Discard()
-
-	// Check if pinning
-	bk := getBucketKey(key, id)
-	if _, err := txn.Get(bk.ChildString(string(openapi.PINNING))); err != nil {
-		if !errors.Is(err, ds.ErrNotFound) {
-			return fmt.Errorf("getting bucket key: %v", err)
-		}
-	} else {
-		return ErrInProgress
+		return fmt.Errorf("dequeueing request")
 	}
 
-	// Remove queue key
-	if err := txn.Delete(dsQueuePrefix.ChildString(id)); err != nil {
-		return fmt.Errorf("deleting queue key: %v", err)
-	}
+	// Mark for removal
+	r.Remove = true
+	r.Status = openapi.QUEUED
 
-	// Remove all possible bucket keys
-	if err := txn.Delete(bk.ChildString(string(openapi.QUEUED))); err != nil {
-		return fmt.Errorf("deleting bucket key (queued): %v", err)
-	}
-	if err := txn.Delete(bk.ChildString(string(openapi.PINNED))); err != nil {
-		return fmt.Errorf("deleting bucket key (pinned): %v", err)
-	}
-	if err := txn.Delete(bk.ChildString(string(openapi.FAILED))); err != nil {
-		return fmt.Errorf("deleting bucket key (failed): %v", err)
-	}
-
-	if err := txn.Commit(); err != nil {
-		return fmt.Errorf("committing txn: %v", err)
+	// Re-enqueue
+	if err := q.enqueue(*r, true); err != nil {
+		return fmt.Errorf("re-enqueueing request: %v", err)
 	}
 	return nil
 }
@@ -332,9 +425,8 @@ func (q *Queue) enqueue(r Request, isNew bool) error {
 		if err != nil {
 			return fmt.Errorf("encoding request: %v", err)
 		}
-		bk := getBucketKey(r.Key, r.Requestid)
-		if err := q.store.Put(bk.ChildString(string(openapi.PINNING)), val); err != nil {
-			return fmt.Errorf("putting status key: %v", err)
+		if err := q.store.Put(getBucketKey(r.Key, r.Requestid), val); err != nil {
+			return fmt.Errorf("putting group key: %v", err)
 		}
 	} else {
 		// Move the request to the "pinning" queue
@@ -356,6 +448,72 @@ func (q *Queue) enqueue(r Request, isNew bool) error {
 		}
 	}()
 	return nil
+}
+
+func (q *Queue) dequeue(key, id string) (*Request, error) {
+	txn, err := q.store.NewTransactionExtended(false)
+	if err != nil {
+		return nil, fmt.Errorf("creating txn: %v", err)
+	}
+	defer txn.Discard()
+
+	// Check if pinning
+	r, err := q.getRequest(txn, key, id)
+	if errors.Is(err, ds.ErrNotFound) {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("getting group key: %v", err)
+	} else if r.Status == openapi.PINNING {
+		return nil, ErrInProgress
+	}
+
+	// Remove queue key
+	if err := txn.Delete(dsQueuePrefix.ChildString(id)); err != nil {
+		return nil, fmt.Errorf("putting key: %v", err)
+	}
+
+	if err := txn.Commit(); err != nil {
+		return nil, fmt.Errorf("committing txn: %v", err)
+	}
+	return r, nil
+}
+
+func (q *Queue) worker(num int) {
+	for {
+		select {
+		case <-q.ctx.Done():
+			return
+
+		case r := <-q.jobCh:
+			if q.ctx.Err() != nil {
+				return
+			}
+			log.Debugf("worker %d got job %s", num, r.Requestid)
+
+			// Handle the request with the handler func
+			status := openapi.PINNED
+			if err := q.handler(q.ctx, r); err != nil {
+				status = openapi.FAILED
+				log.Debugf("error handling request: %v", err)
+			}
+
+			if r.Remove {
+				if err := q.removeRequest(r); err != nil {
+					log.Debugf("error removing request: %v", err)
+				}
+			} else {
+				// Finalize request by setting status to "pinned" or "failed"
+				if err := q.moveRequest(r, openapi.PINNING, status); err != nil {
+					log.Debugf("error updating status (%s): %v", status, err)
+				}
+			}
+
+			log.Debugf("worker %d finished job %s", num, r.Requestid)
+			go func() {
+				q.doneCh <- struct{}{}
+			}()
+		}
+	}
 }
 
 func (q *Queue) start() {
@@ -414,38 +572,6 @@ func (q *Queue) getQueued() ([]Request, error) {
 	return reqs, nil
 }
 
-func (q *Queue) worker(num int) {
-	for {
-		select {
-		case <-q.ctx.Done():
-			return
-
-		case r := <-q.jobCh:
-			if q.ctx.Err() != nil {
-				return
-			}
-			log.Debugf("worker %d got job %s", num, r.Requestid)
-
-			// Handle the request with the handler func
-			status := openapi.PINNED
-			if err := q.handler(q.ctx, r); err != nil {
-				status = openapi.FAILED
-				log.Debugf("error handling request: %v", err)
-			}
-
-			// Finalize request by moving it to either the "pinned" or "failed" queue
-			if err := q.moveRequest(r, openapi.PINNING, status); err != nil {
-				log.Debugf("error updating status (%s): %v", status, err)
-			}
-
-			log.Debugf("worker %d finished job %s", num, r.Requestid)
-			go func() {
-				q.doneCh <- struct{}{}
-			}()
-		}
-	}
-}
-
 func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	txn, err := q.store.NewTransaction(false)
 	if err != nil {
@@ -453,43 +579,58 @@ func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	}
 	defer txn.Discard()
 
-	fromKey := getBucketKey(r.Key, r.Requestid).ChildString(string(from))
-	toKey := getBucketKey(r.Key, r.Requestid).ChildString(string(to))
-
-	// Re-fetch in case 'from' was removed by calling RemoveRequest
-	val, err := txn.Get(fromKey)
-	if err != nil {
-		return fmt.Errorf("getting bucket key: %v", err)
-	}
-	r, err = decode(val)
-	if err != nil {
-		return fmt.Errorf("decoding bucket key: %v", err)
-	}
+	// Update status
 	r.Status = to
-	val, err = encode(r)
-	if err != nil {
-		return fmt.Errorf("encoding bucket key: %v", err)
+
+	// Reset 'replace' and 'remove' flags if the request is complete
+	if to == openapi.PINNED || to == openapi.FAILED {
+		r.Replace = false
+		r.Remove = false // Only needed if the removal failed
 	}
 
-	// Delete from global queue
+	val, err := encode(r)
+	if err != nil {
+		return fmt.Errorf("encoding group key: %v", err)
+	}
+
+	// Handle queue key
 	if from == openapi.QUEUED {
 		if err := txn.Delete(dsQueuePrefix.ChildString(r.Requestid)); err != nil {
 			return fmt.Errorf("deleting key: %v", err)
 		}
 	}
-	// Add to global queue
 	if to == openapi.QUEUED {
 		if err := txn.Put(dsQueuePrefix.ChildString(r.Requestid), val); err != nil {
 			return fmt.Errorf("putting key: %v", err)
 		}
 	}
 
-	// Migrate key to new status
-	if err := txn.Put(toKey, val); err != nil {
-		return fmt.Errorf("putting bucket key: %v", err)
+	// Update group key
+	if err := txn.Put(getBucketKey(r.Key, r.Requestid), val); err != nil {
+		return fmt.Errorf("putting group key: %v", err)
 	}
-	if err := txn.Delete(fromKey); err != nil {
-		return fmt.Errorf("deleting bucket key: %v", err)
+
+	if err := txn.Commit(); err != nil {
+		return fmt.Errorf("committing txn: %v", err)
+	}
+	return nil
+}
+
+func (q *Queue) removeRequest(r Request) error {
+	txn, err := q.store.NewTransaction(false)
+	if err != nil {
+		return fmt.Errorf("creating txn: %v", err)
+	}
+	defer txn.Discard()
+
+	// Remove queue key
+	if err := txn.Delete(dsQueuePrefix.ChildString(r.Requestid)); err != nil {
+		return fmt.Errorf("deleting queue key: %v", err)
+	}
+
+	// Remove group key
+	if err := txn.Delete(getBucketKey(r.Key, r.Requestid)); err != nil {
+		return fmt.Errorf("deleting group key: %v", err)
 	}
 
 	if err := txn.Commit(); err != nil {

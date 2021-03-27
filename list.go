@@ -2,6 +2,7 @@ package buckets
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/go-threads/core/did"
@@ -15,6 +16,9 @@ func (b *Buckets) ListPath(
 	identity did.Token,
 	pth string,
 ) (*PathItem, *Bucket, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	pth = trimSlash(pth)
 	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, identity, pth)
 	if err != nil {

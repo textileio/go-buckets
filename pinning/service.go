@@ -2,7 +2,6 @@ package pinning
 
 // @todo: Add delegates field to responses
 // @todo: Leverage origins when setting path
-// @todo: Handle remaining query types
 
 import (
 	"context"
@@ -27,6 +26,9 @@ var (
 
 	// ErrPinNotFound a pin was not found.
 	ErrPinNotFound = errors.New("pin not found")
+
+	// ErrPermissionDenied indicates an identity does not have the required athorization.
+	ErrPermissionDenied = errors.New("permission denied")
 
 	// PinTimeout is the max time taken to pin a Cid.
 	PinTimeout = time.Hour
@@ -66,8 +68,10 @@ func (s *Service) ListPins(
 	query q.Query,
 ) ([]openapi.PinStatus, error) {
 	// Ensure bucket is readable by identity
-	if _, err := s.lib.Get(ctx, thread, key, identity); err != nil {
-		return nil, err
+	if ok, err := s.lib.IsReadablePath(ctx, thread, key, identity, ""); err != nil {
+		return nil, fmt.Errorf("authenticating read: %v", err)
+	} else if !ok {
+		return nil, ErrPermissionDenied
 	}
 
 	list, err := s.queue.ListRequests(key, query)
@@ -87,6 +91,13 @@ func (s *Service) AddPin(
 	identity did.Token,
 	pin openapi.Pin,
 ) (*openapi.PinStatus, error) {
+	// Ensure bucket is writable by identity
+	if ok, err := s.lib.IsWritablePath(ctx, thread, key, identity, ""); err != nil {
+		return nil, fmt.Errorf("authenticating read: %v", err)
+	} else if !ok {
+		return nil, ErrPermissionDenied
+	}
+
 	// Verify pin cid
 	if _, err := c.Decode(pin.Cid); err != nil {
 		return nil, fmt.Errorf("decoding pin cid: %v", err)
@@ -117,7 +128,10 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 
 	// Open a transaction that we can use to control blocking since we may need
 	// to push a failure to the bucket if SetPath fails.
-	txn := s.lib.NewTxn(r.Thread, r.Key, r.Identity)
+	txn, err := s.lib.NewTxn(r.Thread, r.Key, r.Identity)
+	if err != nil {
+		return err
+	}
 	defer txn.Close()
 
 	fail := func(reason error) error {
@@ -132,22 +146,31 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 		return fail(fmt.Errorf("decoding cid: %v", err))
 	}
 
-	// Replace placeholder with requested Cid and set status to "pinned"
-	pctx, pcancel := context.WithTimeout(ctx, PinTimeout)
-	defer pcancel()
-	if _, _, err := txn.SetPath(
-		pctx,
-		nil,
-		r.Requestid,
-		cid,
-		map[string]interface{}{
-			"pin": map[string]interface{}{
-				"status": openapi.PINNED,
+	if r.Remove {
+		// Remove path from the bucket
+		ctx, cancel := context.WithTimeout(ctx, statusTimeout)
+		defer cancel()
+		if _, _, err := txn.RemovePath(ctx, nil, r.Requestid); err != nil {
+			return fail(fmt.Errorf("removing path %s: %v", r.Requestid, err))
+		}
+	} else {
+		// Replace placeholder at path with openapi.Pin.Cid
+		pctx, pcancel := context.WithTimeout(ctx, PinTimeout)
+		defer pcancel()
+		if _, _, err := txn.SetPath(
+			pctx,
+			nil,
+			r.Requestid,
+			cid,
+			map[string]interface{}{
+				"pin": map[string]interface{}{
+					"status": openapi.PINNED,
+				},
 			},
-		},
-	); err != nil {
-		// @todo: Skip fail handler if path not found
-		return fail(fmt.Errorf("setting path %s: %v", r.Requestid, err))
+		); err != nil {
+			// @todo: Skip fail handler if path not found
+			return fail(fmt.Errorf("setting path %s: %v", r.Requestid, err))
+		}
 	}
 
 	log.Debugf("request completed: %s", r.Requestid)
@@ -158,7 +181,7 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 func (s *Service) failRequest(ctx context.Context, txn *buckets.Txn, r q.Request, reason error) error {
 	log.Debugf("failing request %s with reason: %v", r.Requestid, reason)
 
-	// Update placeholder with status "failed"
+	// Update placeholder with failure reason
 	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
 	defer cancel()
 	if _, err := txn.PushPath(
@@ -190,15 +213,17 @@ func (s *Service) GetPin(
 	id string,
 ) (*openapi.PinStatus, error) {
 	// Ensure bucket is readable by identity
-	if _, err := s.lib.Get(ctx, thread, key, identity); err != nil {
-		return nil, err
+	if ok, err := s.lib.IsReadablePath(ctx, thread, key, identity, ""); err != nil {
+		return nil, fmt.Errorf("authenticating read: %v", err)
+	} else if !ok {
+		return nil, ErrPermissionDenied
 	}
 
 	r, err := s.queue.GetRequest(key, id)
 	if errors.Is(err, ds.ErrNotFound) {
 		return nil, ErrPinNotFound
 	} else if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getting request: %v", err)
 	}
 
 	log.Debugf("got request %s in %s", id, key)
@@ -214,33 +239,25 @@ func (s *Service) ReplacePin(
 	id string,
 	pin openapi.Pin,
 ) (*openapi.PinStatus, error) {
+	// Ensure bucket is writable by identity
+	if ok, err := s.lib.IsWritablePath(ctx, thread, key, identity, ""); err != nil {
+		return nil, fmt.Errorf("authenticating read: %v", err)
+	} else if !ok {
+		return nil, ErrPermissionDenied
+	}
+
 	// Verify pin cid
 	if _, err := c.Decode(pin.Cid); err != nil {
 		return nil, fmt.Errorf("decoding pin cid: %v", err)
 	}
 
-	//status := openapi.PinStatus{
-	//	Requestid: id,
-	//	Status:    openapi.QUEUED,
-	//	Pin:       pin,
-	//}
-
-	// Remove from queues.
-	if err := s.queue.RemoveRequest(key, id); err != nil {
-		return nil, fmt.Errorf("removing request: %v", err)
+	r, err := s.queue.ReplaceRequest(key, id, pin)
+	if err != nil {
+		return nil, fmt.Errorf("replacing request: %v", err)
 	}
 
-	//// Re-enqueue request
-	//r, err := s.queue.AddRequest(q.RequestParams{
-	//	Pin: pin,
-	//	Time: time.Now(),
-	//}thread, key, identity, pin, time.Now())
-	//if err != nil {
-	//	return nil, fmt.Errorf("adding request: %v", err)
-	//}
-
 	log.Debugf("replaced request %s in %s", id, key)
-	return nil, nil
+	return r, nil
 }
 
 // RemovePin removes an openapi.PinStatus from a bucket.
@@ -251,19 +268,13 @@ func (s *Service) RemovePin(
 	identity did.Token,
 	id string,
 ) error {
-	// Remove from bucket. This will block if the request is pinning.
-	if _, _, err := s.lib.RemovePath(
-		ctx,
-		thread,
-		key,
-		identity,
-		nil,
-		id,
-	); err != nil {
-		return fmt.Errorf("removing path %s: %v", id, err)
+	// Ensure bucket is writable by identity
+	if ok, err := s.lib.IsWritablePath(ctx, thread, key, identity, ""); err != nil {
+		return fmt.Errorf("authenticating read: %v", err)
+	} else if !ok {
+		return ErrPermissionDenied
 	}
 
-	// Remove from queues
 	if err := s.queue.RemoveRequest(key, id); err != nil {
 		return fmt.Errorf("removing request: %v", err)
 	}

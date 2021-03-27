@@ -22,7 +22,10 @@ func (b *Buckets) SetPath(
 	cid c.Cid,
 	meta map[string]interface{},
 ) (int64, *Bucket, error) {
-	txn := b.NewTxn(thread, key, identity)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		return 0, nil, err
+	}
 	defer txn.Close()
 	return txn.SetPath(ctx, root, pth, cid, meta)
 }

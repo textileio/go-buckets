@@ -47,7 +47,10 @@ func (b *Buckets) PushPath(
 	root path.Resolved,
 	input PushPathsInput,
 ) (*PushPathsResult, error) {
-	txn := b.NewTxn(thread, key, identity)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		return nil, err
+	}
 	defer txn.Close()
 	return txn.PushPath(ctx, root, input)
 }
@@ -86,18 +89,22 @@ func (b *Buckets) PushPaths(
 	identity did.Token,
 	root path.Resolved,
 ) (chan<- PushPathsInput, <-chan PushPathsResult, <-chan error) {
-	txn := b.NewTxn(thread, key, identity)
-	in, out, errs := txn.PushPaths(ctx, root)
+	errs := make(chan error, 1)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		errs <- err
+		return nil, nil, errs
+	}
 
-	errs2 := make(chan error, 1)
+	in, out, perrs := txn.PushPaths(ctx, root)
 	go func() {
 		defer txn.Close()
-		for err := range errs {
-			errs2 <- err
+		for err := range perrs {
+			errs <- err
 			return
 		}
 	}()
-	return in, out, errs2
+	return in, out, errs
 }
 
 func (t *Txn) PushPaths(

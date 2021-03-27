@@ -20,7 +20,10 @@ func (b *Buckets) PushPathInfo(
 	pth string,
 	info map[string]interface{},
 ) (*Bucket, error) {
-	txn := b.NewTxn(thread, key, identity)
+	txn, err := b.NewTxn(thread, key, identity)
+	if err != nil {
+		return nil, err
+	}
 	defer txn.Close()
 	return txn.PushPathInfo(ctx, root, pth, info)
 }
@@ -88,6 +91,9 @@ func (b *Buckets) PullPathInfo(
 	identity did.Token,
 	pth string,
 ) (map[string]interface{}, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	pth, err := parsePath(pth)
 	if err != nil {
 		return nil, err

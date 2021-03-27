@@ -39,6 +39,9 @@ func (b *Buckets) PullPath(
 	identity did.Token,
 	pth string,
 ) (io.ReadCloser, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	pth = trimSlash(pth)
 	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, identity, pth)
 	if err != nil {

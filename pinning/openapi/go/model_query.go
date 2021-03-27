@@ -14,7 +14,7 @@ type Query struct {
 	// Name can be used to filer by Pin name (by default case-sensitive, exact match).
 	Name string `form:"name" json:"name,omitempty"`
 	// Match can be used to customize the text matching strategy applied when Name is present.
-	Match TextMatchingStrategy `form:"match" json:"match,omitempty"`
+	Match string `form:"match" json:"match,omitempty"`
 	// Status can be used to filter by Pin status.
 	Status string `form:"status" json:"status,omitempty"`
 	// Before can by used to filter by before creation (queued) time.

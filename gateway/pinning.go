@@ -3,13 +3,11 @@ package gateway
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	c "github.com/ipfs/go-cid"
 	"github.com/textileio/go-buckets/pinning"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 	"github.com/textileio/go-buckets/pinning/queue"
@@ -37,15 +35,9 @@ func (g *Gateway) listPins(c *gin.Context, key string) {
 		return
 	}
 
-	q, err := oapiQueryToQuery(query)
-	if err != nil {
-		newFailure(c, http.StatusBadRequest, err)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
-	pins, err := g.ps.ListPins(ctx, thread, key, token, q)
+	pins, err := g.ps.ListPins(ctx, thread, key, token, oapiQueryToQuery(query))
 	if err != nil {
 		newFailure(c, http.StatusBadRequest, err)
 		return
@@ -58,22 +50,23 @@ func (g *Gateway) listPins(c *gin.Context, key string) {
 	c.JSON(http.StatusOK, res)
 }
 
-func oapiQueryToQuery(q openapi.Query) (queue.Query, error) {
+func oapiQueryToQuery(q openapi.Query) queue.Query {
 	var (
-		cids          []c.Cid
+		match         openapi.TextMatchingStrategy
 		statuses      []openapi.Status
 		before, after time.Time
 		limit         int
 		meta          map[string]string
 	)
-	if len(q.Cid) != 0 {
-		for _, i := range q.Cid {
-			d, err := c.Decode(i)
-			if err != nil {
-				return queue.Query{}, fmt.Errorf("decoding pin cid: %v", err)
-			}
-			cids = append(cids, d)
-		}
+	switch q.Match {
+	case "exact":
+		match = openapi.EXACT
+	case "iexact":
+		match = openapi.IEXACT
+	case "partial":
+		match = openapi.PARTIAL
+	case "ipartial":
+		match = openapi.IPARTIAL
 	}
 	if len(q.Status) != 0 {
 		for _, p := range strings.Split(q.Status, ",") {
@@ -106,15 +99,15 @@ func oapiQueryToQuery(q openapi.Query) (queue.Query, error) {
 		meta = *q.Meta
 	}
 	return queue.Query{
-		Cid:      cids,
+		Cids:     q.Cid,
 		Name:     q.Name,
-		Match:    q.Match,
+		Match:    match,
 		Statuses: statuses,
 		Before:   before,
 		After:    after,
 		Limit:    limit,
 		Meta:     meta,
-	}, nil
+	}
 }
 
 func (g *Gateway) addPinHandler(c *gin.Context) {
