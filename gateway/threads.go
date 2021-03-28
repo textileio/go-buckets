@@ -41,7 +41,7 @@ func (g *Gateway) renderThread(c *gin.Context, thread core.ID) {
 		} else {
 			name = r.Key
 		}
-		p := gopath.Join(collection.Name, r.Key)
+		p := gopath.Join("thread", thread.String(), collection.Name, r.Key)
 		if token.Defined() {
 			p += "?token=" + string(token)
 		}
@@ -53,7 +53,7 @@ func (g *Gateway) renderThread(c *gin.Context, thread core.ID) {
 		}
 	}
 	c.HTML(http.StatusOK, "/public/html/unixfs.gohtml", gin.H{
-		"Title":   "Index of " + gopath.Join("/thread", thread.String()),
+		"Title":   "Index of " + gopath.Join("/thread", thread.String(), collection.Name),
 		"Root":    "/",
 		"Path":    "",
 		"Updated": "",

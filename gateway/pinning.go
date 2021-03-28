@@ -184,7 +184,6 @@ func getQuery(q openapi.Query) queue.Query {
 	var (
 		match    openapi.TextMatchingStrategy
 		statuses []openapi.Status
-		limit    int
 	)
 	switch q.Match {
 	case "exact":
@@ -221,7 +220,7 @@ func getQuery(q openapi.Query) queue.Query {
 		Statuses: statuses,
 		Before:   q.Before,
 		After:    q.After,
-		Limit:    limit,
+		Limit:    int(q.Limit),
 	}
 }
 

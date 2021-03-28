@@ -162,11 +162,6 @@ func (g *Gateway) Start() {
 	log.Infof("gateway listening at %s", g.server.Addr)
 }
 
-// Addr returns the gateway's address.
-func (g *Gateway) Addr() string {
-	return g.server.Addr
-}
-
 // Close the gateway.
 func (g *Gateway) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -175,6 +170,21 @@ func (g *Gateway) Close() error {
 		return fmt.Errorf("shutting down server: %v", err)
 	}
 	return nil
+}
+
+// Addr returns the gateway's listen address.
+func (g *Gateway) Addr() string {
+	return g.server.Addr
+}
+
+// Url returns the gateway's externally configured URL.
+func (g *Gateway) Url() string {
+	return g.url
+}
+
+// Buckets returns the gateway's bucket lib.
+func (g *Gateway) Buckets() *buckets.Buckets {
+	return g.lib
 }
 
 // dashboardHandler renders a dev or org dashboard.

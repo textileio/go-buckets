@@ -1114,8 +1114,6 @@ github.com/textileio/go-ds-badger3 v0.0.0-20210324034212-7b7fb3be3d1c/go.mod h1:
 github.com/textileio/go-ds-mongo v0.1.4/go.mod h1:Zf6JlMPiIQUUmGlFFn5Z65C9p9LAvPg7XvX+qdGmTsU=
 github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5 h1:wy2WAFw2u0RAh7Mnlnh7/Hmc9LlSADDHLlPNZQDBvmM=
 github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5/go.mod h1:Zf6JlMPiIQUUmGlFFn5Z65C9p9LAvPg7XvX+qdGmTsU=
-github.com/textileio/go-threads v1.0.3-0.20210324055308-a39696dd6376 h1:I6bewUxZ9XzdsGRJy4vLewMxxIRX3+EsvODb1opI9jY=
-github.com/textileio/go-threads v1.0.3-0.20210324055308-a39696dd6376/go.mod h1:1H3qvMKLuyuAvPmUTFGlohjBWdguzXATouiNQNXBgdo=
 github.com/texttheater/golang-levenshtein v0.0.0-20180516184445-d188e65d659e/go.mod h1:XDKHRm5ThF8YJjx001LtgelzsoaEcvnA7lVWz9EeX3g=
 github.com/tidwall/gjson v1.3.5 h1:2oW9FBNu8qt9jy5URgrzsVx/T/KSn3qn/smJQ0crlDQ=
 github.com/tidwall/gjson v1.3.5/go.mod h1:P256ACg0Mn+j1RXIDXoss50DeIABTYK1PULOJHhxOls=

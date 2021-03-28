@@ -1,8 +1,5 @@
 package gateway
 
-// @todo: Get root from path
-// @todo: Use form field to set push path
-
 import (
 	"context"
 	"fmt"
@@ -15,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/go-buckets"
+	"github.com/textileio/go-buckets/dag"
 	core "github.com/textileio/go-threads/core/thread"
 )
 
@@ -63,6 +61,16 @@ func (g *Gateway) pushBucketPaths(c *gin.Context, thread core.ID, key string) {
 		return
 	}
 	var root path.Resolved
+	if v, ok := c.GetQuery("root"); ok {
+		var err error
+		root, err = dag.NewResolvedPath(v)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, PostError{
+				Error: fmt.Sprintf("parsing root param: %v", err),
+			})
+			return
+		}
+	}
 
 	_, params, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil {

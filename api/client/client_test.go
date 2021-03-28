@@ -1091,6 +1091,8 @@ func checkAccess(t *testing.T, ctx context.Context, c *client.Client, check acce
 	defer tmp.Close()
 	_, err = io.CopyN(tmp, rand.Reader, 1024)
 	require.NoError(t, err)
+	_, err = tmp.Seek(0, 0)
+	require.NoError(t, err)
 	q, err := c.PushPaths(ctx, check.Thread, check.Key)
 	require.NoError(t, err)
 	err = q.AddReader(check.Path, tmp, 0)

@@ -1,4 +1,4 @@
-package gateway
+package gateway_test
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/textileio/go-buckets/api/apitest"
 	"github.com/textileio/go-buckets/api/common"
 	"github.com/textileio/go-buckets/cmd"
+	. "github.com/textileio/go-buckets/gateway"
 	"github.com/textileio/go-buckets/ipns"
 	"github.com/textileio/go-buckets/pinning"
 	"github.com/textileio/go-buckets/pinning/queue"
@@ -65,7 +66,7 @@ func TestMain(m *testing.M) {
 	var err error
 	origins, err = getOrigins()
 	if err != nil {
-		log.Fatalf("failed to get ipfs node origins: %v", err)
+		panic(fmt.Errorf("failed to get ipfs node origins: %v", err))
 	}
 
 	exitVal := m.Run()
@@ -84,7 +85,7 @@ func Test_ListPins(t *testing.T) {
 		files := make([]path.Resolved, total)
 		for i := 0; i < total; i++ {
 			files[i] = createIpfsFile(t, i%(batchSize/2) == 0) // Two per batch should fail (blocks unavailable)
-			log.Debugf("created file %d", i)
+			t.Logf("created file %d", i)
 		}
 
 		// Blast a bunch of requests. Each batch hits a different bucket.
@@ -492,9 +493,9 @@ func newGateway(t *testing.T) *Gateway {
 
 func newClient(t *testing.T, gw *Gateway) *psc.Client {
 	token := newIdentityToken(t)
-	buck, _, _, err := gw.lib.Create(context.Background(), token)
+	buck, _, _, err := gw.Buckets().Create(context.Background(), token)
 	require.NoError(t, err)
-	url := fmt.Sprintf("%s/bps/%s", gw.url, buck.Key)
+	url := fmt.Sprintf("%s/bps/%s", gw.Url(), buck.Key)
 	return psc.NewClient(url, string(token))
 }
 

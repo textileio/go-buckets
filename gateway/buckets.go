@@ -55,8 +55,10 @@ func (g *Gateway) renderBucket(c *gin.Context, thread core.ID, key, pth string) 
 		c.Render(200, render.Reader{ContentLength: -1, Reader: mr})
 	} else {
 		var base string
-		if !g.subdomains {
+		if g.subdomains {
 			base = collection.Name
+		} else {
+			base = gopath.Join("thread", thread.String(), collection.Name)
 		}
 		var links []link
 		for _, item := range rep.Items {
