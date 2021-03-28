@@ -52,7 +52,9 @@ Please also read the [security note](https://github.com/ipfs/go-ipfs#security-is
 
 ## Background
 
-Buckets provide a dynamic wrapper around [UnixFS]([UnixFS](https://github.com/ipfs/go-unixfs)) directories with auto-updating IPNS, static website rendering, access control, and encryption.
+Buckets function a bit like S3 buckets. They're a virtual filesystem where you can push, pull, list, and cat files. You can share them via web links or render the whole thing as a website or web app. They also function a bit like a Git repository. The point of entry is from a folder on your local machine that is synced to a _remote_.
+
+At a lower level, buckets provide a dynamic wrapper around [UnixFS]([UnixFS](https://github.com/ipfs/go-unixfs)) directories with auto-updating IPNS, static website rendering, access control, and encryption. Since buckets are just ThreadDB collection _instances_ (see [go-threads](https://github.com/textileio/go-threads)), they automatically leverage the distributed nature of ThreadDB by allowing multiple identities to write to the same bucket hosted by different Libp2p hosts.
 
 ## Install
 
@@ -158,8 +160,6 @@ Flags:
 
 Use "buck [command] --help" for more information about a command.
 ```
-
-A bucket functions a bit like an S3 bucket. It's a virtual filesystem where you can push, pull, list, and cat files. You can share them via web links or render the whole thing as a website or web app. They also function a bit like a Git repository. The point of entry is from a folder on your local machine that is synced to a _remote_.
 
 To get started, initialize a new bucket.
 
@@ -550,7 +550,7 @@ Visit the [GoDoc](https://pkg.go.dev/github.com/textileio/go-buckets/local) for 
 
 Create a new bucket by constructing a configuration object. Only `Path` is required.
 
-```
+```go
 // Setup the buckets lib
 buckets := local.NewBuckets(cmd.NewClients("api.textile.io:443", false), local.DefaultConfConfig())
 
@@ -573,7 +573,7 @@ To create a bucket from an existing remote, use its thread ID and instance ID (b
 
 `GetLocalBucket` returns the bucket at path.
 
-```
+```go
 mybuck, err := buckets.GetLocalBucket(context.Background(), "path/to/bucket/folder")
 ```
 
@@ -581,7 +581,7 @@ mybuck, err := buckets.GetLocalBucket(context.Background(), "path/to/bucket/fold
 
 `PushLocal` pushes all staged changes to the remote and returns the new local and remote root Cids. These roots will only be different if the bucket is private (the remote is encrypted).
 
-```
+```go
 newRoots, err := mybuck.PushLocal()
 ```
 
@@ -591,7 +591,7 @@ See `local.PathOption` for more options when pushing.
 
 `PullRemote` pulls all remote changes locally and returns the new root Cids.
 
-```
+```go
 newRoots, err := mybuck.PullRemote()
 ```
 
