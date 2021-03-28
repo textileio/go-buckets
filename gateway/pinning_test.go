@@ -53,8 +53,6 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	queue.MaxConcurrency = 10 // Reduce concurrency to test overloading workers
-	pinning.PinTimeout = time.Second * 5
 }
 
 func TestMain(m *testing.M) {
@@ -75,6 +73,8 @@ func TestMain(m *testing.M) {
 }
 
 func Test_ListPins(t *testing.T) {
+	queue.MaxConcurrency = 10 // Reduce concurrency to test overloading workers
+	pinning.PinTimeout = time.Second * 10
 	gw := newGateway(t)
 
 	t.Run("pagination", func(t *testing.T) {
@@ -100,7 +100,7 @@ func Test_ListPins(t *testing.T) {
 					i := i
 					j := i + (b * batchSize)
 					f := files[j]
-					time.Sleep(time.Second)
+					time.Sleep(time.Second * 2)
 					eg.Go(func() error {
 						if gctx.Err() != nil {
 							return nil
@@ -115,7 +115,7 @@ func Test_ListPins(t *testing.T) {
 			}(c, b)
 		}
 
-		time.Sleep(time.Second * 25) // Allow time for requests to be added
+		time.Sleep(time.Minute) // Allow time for requests to be added
 
 		// Test pagination
 		for _, c := range clients {
@@ -294,6 +294,7 @@ func Test_ListPins(t *testing.T) {
 }
 
 func Test_AddPin(t *testing.T) {
+	pinning.PinTimeout = time.Second * 5
 	gw := newGateway(t)
 	c := newClient(t, gw)
 
@@ -332,6 +333,7 @@ func Test_AddPin(t *testing.T) {
 }
 
 func Test_GetPin(t *testing.T) {
+	pinning.PinTimeout = time.Second * 5
 	gw := newGateway(t)
 	c := newClient(t, gw)
 
@@ -383,6 +385,7 @@ func Test_GetPin(t *testing.T) {
 }
 
 func Test_ReplacePin(t *testing.T) {
+	pinning.PinTimeout = time.Second * 5
 	gw := newGateway(t)
 	c := newClient(t, gw)
 
@@ -423,6 +426,7 @@ func Test_ReplacePin(t *testing.T) {
 }
 
 func Test_RemovePin(t *testing.T) {
+	pinning.PinTimeout = time.Second * 5
 	gw := newGateway(t)
 	c := newClient(t, gw)
 

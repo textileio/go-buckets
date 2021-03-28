@@ -52,7 +52,8 @@ func TestQueue_ListRequests(t *testing.T) {
 		key := newBucketkey(t)
 		ids := make([]string, limit)
 		for i := 0; i < limit; i++ {
-			now = now.Add(time.Second) // Pagination is not possible at sub second resolution due limits in the API spec
+			// Pagination is not possible at sub second resolution due limits in the API spec
+			now = now.Add(time.Second * 2)
 			p := newParams(key, now, time.Millisecond, succeed)
 			r, err := q.AddRequest(p)
 			require.NoError(t, err)
