@@ -1,6 +1,7 @@
 package queue
 
 // @todo: Add doc strings
+// @todo: Handle reload in-progress pins after shutdown
 // @todo: Batch jobs by key, then handler can directly fetch cids and use PushPaths to save bucket writes
 
 import (
@@ -255,7 +256,7 @@ loop:
 func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, error) {
 	query = query.setDefaults()
 	if !query.Before.IsZero() && !query.After.IsZero() {
-		return nil, fmt.Errorf("before and after cannot be used together")
+		return nil, errors.New("before and after cannot be used together")
 	}
 
 	var (
@@ -384,7 +385,7 @@ func (q *Queue) getRequest(reader ds.Read, key, id string) (*Request, error) {
 func (q *Queue) ReplaceRequest(key, id string, pin openapi.Pin) (*openapi.PinStatus, error) {
 	r, err := q.dequeue(key, id)
 	if err != nil {
-		return nil, fmt.Errorf("dequeueing request")
+		return nil, fmt.Errorf("dequeueing request: %w", err)
 	}
 
 	// Mark for replacement
@@ -402,7 +403,7 @@ func (q *Queue) ReplaceRequest(key, id string, pin openapi.Pin) (*openapi.PinSta
 func (q *Queue) RemoveRequest(key, id string) error {
 	r, err := q.dequeue(key, id)
 	if err != nil {
-		return fmt.Errorf("dequeueing request")
+		return fmt.Errorf("dequeueing request: %w", err)
 	}
 
 	// Mark for removal

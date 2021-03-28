@@ -18,11 +18,14 @@ type Query struct {
 	// Status can be used to filter by Pin status.
 	Status string `form:"status" json:"status,omitempty"`
 	// Before can by used to filter by before creation (queued) time.
-	Before *time.Time `form:"before" json:"before,omitempty"`
+	Before time.Time `form:"before" json:"before,omitempty"`
 	// After can by used to filter by after creation (queued) time.
-	After *time.Time `form:"after" json:"after,omitempty"`
+	After time.Time `form:"after" json:"after,omitempty"`
 	// Limit specifies the max number of Pins to return.
-	Limit *int32 `form:"limit" json:"limit,omitempty"`
-	// Meta can be used to filter results by Pin metadata.
-	Meta *map[string]string `form:"meta" json:"meta,omitempty"`
+	Limit int32 `form:"limit" json:"limit,omitempty"`
 }
+
+// QueryMeta can be used to filter results by Pin metadata.
+// This was pulled out of the openapi generated Query above because gin is not able to
+// auto parse the map string value sent by the generic pinning client, i.e., "meta=map[foo:one bar:two]".
+type QueryMeta map[string]string

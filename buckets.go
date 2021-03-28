@@ -321,18 +321,18 @@ func (b *Buckets) saveAndPublish(
 	return nil
 }
 
-func instanceToBucket(thread core.ID, instance *collection.Bucket) *Bucket {
-	return &Bucket{
-		Thread: thread,
-		Bucket: *instance,
-	}
-}
-
-func isPathNotFoundErr(err error) bool {
+func IsPathNotFoundErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "could not resolve path") ||
 		strings.Contains(msg, "no link named")
+}
+
+func instanceToBucket(thread core.ID, instance *collection.Bucket) *Bucket {
+	return &Bucket{
+		Thread: thread,
+		Bucket: *instance,
+	}
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	c "github.com/ipfs/go-cid"
-	ds "github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/textileio/go-buckets"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
@@ -23,9 +22,6 @@ import (
 
 var (
 	log = logging.Logger("buckets/ps")
-
-	// ErrPinNotFound a pin was not found.
-	ErrPinNotFound = errors.New("pin not found")
 
 	// ErrPermissionDenied indicates an identity does not have the required athorization.
 	ErrPermissionDenied = errors.New("permission denied")
@@ -93,7 +89,7 @@ func (s *Service) AddPin(
 ) (*openapi.PinStatus, error) {
 	// Ensure bucket is writable by identity
 	if ok, err := s.lib.IsWritablePath(ctx, thread, key, identity, ""); err != nil {
-		return nil, fmt.Errorf("authenticating read: %v", err)
+		return nil, fmt.Errorf("authenticating write: %v", err)
 	} else if !ok {
 		return nil, ErrPermissionDenied
 	}
@@ -167,8 +163,9 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 					"status": openapi.PINNED,
 				},
 			},
-		); err != nil {
-			// @todo: Skip fail handler if path not found
+		); buckets.IsPathNotFoundErr(err) {
+			return fmt.Errorf("setting path %s: %v", r.Requestid, err)
+		} else if err != nil {
 			return fail(fmt.Errorf("setting path %s: %v", r.Requestid, err))
 		}
 	}
@@ -220,10 +217,8 @@ func (s *Service) GetPin(
 	}
 
 	r, err := s.queue.GetRequest(key, id)
-	if errors.Is(err, ds.ErrNotFound) {
-		return nil, ErrPinNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("getting request: %v", err)
+	if err != nil {
+		return nil, fmt.Errorf("getting request: %w", err)
 	}
 
 	log.Debugf("got request %s in %s", id, key)
@@ -241,7 +236,7 @@ func (s *Service) ReplacePin(
 ) (*openapi.PinStatus, error) {
 	// Ensure bucket is writable by identity
 	if ok, err := s.lib.IsWritablePath(ctx, thread, key, identity, ""); err != nil {
-		return nil, fmt.Errorf("authenticating read: %v", err)
+		return nil, fmt.Errorf("authenticating write: %v", err)
 	} else if !ok {
 		return nil, ErrPermissionDenied
 	}
@@ -253,7 +248,7 @@ func (s *Service) ReplacePin(
 
 	r, err := s.queue.ReplaceRequest(key, id, pin)
 	if err != nil {
-		return nil, fmt.Errorf("replacing request: %v", err)
+		return nil, fmt.Errorf("replacing request: %w", err)
 	}
 
 	log.Debugf("replaced request %s in %s", id, key)
@@ -270,13 +265,13 @@ func (s *Service) RemovePin(
 ) error {
 	// Ensure bucket is writable by identity
 	if ok, err := s.lib.IsWritablePath(ctx, thread, key, identity, ""); err != nil {
-		return fmt.Errorf("authenticating read: %v", err)
+		return fmt.Errorf("authenticating write: %v", err)
 	} else if !ok {
 		return ErrPermissionDenied
 	}
 
 	if err := s.queue.RemoveRequest(key, id); err != nil {
-		return fmt.Errorf("removing request: %v", err)
+		return fmt.Errorf("removing request: %w", err)
 	}
 
 	log.Debugf("removed request %s in %s", id, key)
