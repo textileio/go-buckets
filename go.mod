@@ -2,8 +2,6 @@ module github.com/textileio/go-buckets
 
 go 1.16
 
-replace github.com/textileio/go-threads => ../go-threads
-
 require (
 	github.com/alecthomas/jsonschema v0.0.0-20191017121752-4bb6e3fae4f2
 	github.com/aws/aws-sdk-go v1.32.11 // indirect
@@ -74,7 +72,7 @@ require (
 	github.com/textileio/go-datastore-extensions v1.0.1
 	github.com/textileio/go-ds-badger3 v0.0.0-20210324034212-7b7fb3be3d1c
 	github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5
-	github.com/textileio/go-threads v1.0.3-0.20210324055308-a39696dd6376
+	github.com/textileio/go-threads v1.0.3-0.20210328215802-73e0ec0d7c6d
 	github.com/warpfork/go-wish v0.0.0-20200122115046-b9ea61034e4a // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210118024343-169e9d70c0c2 // indirect
 	github.com/xdg/stringprep v1.0.0 // indirect

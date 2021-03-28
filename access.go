@@ -198,11 +198,11 @@ func (b *Buckets) IsReadablePath(
 	if err != nil {
 		return false, err
 	}
-	_, id, err := core.GetIdentityDID(identity)
+	_, doc, err := core.Validate(identity, nil)
 	if err != nil {
 		return false, err
 	}
-	return instance.IsReadablePath(pth, id), nil
+	return instance.IsReadablePath(pth, doc.ID), nil
 }
 
 func (b *Buckets) IsWritablePath(
@@ -223,9 +223,9 @@ func (b *Buckets) IsWritablePath(
 	if err != nil {
 		return false, err
 	}
-	_, id, err := core.GetIdentityDID(identity)
+	_, doc, err := core.Validate(identity, nil)
 	if err != nil {
 		return false, err
 	}
-	return instance.IsWritablePath(pth, id), nil
+	return instance.IsWritablePath(pth, doc.ID), nil
 }
