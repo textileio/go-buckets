@@ -548,21 +548,5 @@ func getOrigins() ([]maddr.Multiaddr, error) {
 	if err != nil {
 		return nil, err
 	}
-	key, err := ipfs.Key().Self(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	paddr, err := maddr.NewMultiaddr("/p2p/" + key.ID().String())
-	if err != nil {
-		return nil, err
-	}
-	addrs, err := ipfs.Swarm().LocalAddrs(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	paddrs := make([]maddr.Multiaddr, len(addrs))
-	for i, a := range addrs {
-		paddrs[i] = a.Encapsulate(paddr)
-	}
-	return paddrs, nil
+	return pinning.GetLocalAddrs(ipfs)
 }

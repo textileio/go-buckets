@@ -154,6 +154,10 @@ func (b *Buckets) DB() *dbc.Client {
 	return b.db
 }
 
+func (b *Buckets) Ipfs() iface.CoreAPI {
+	return b.ipfs
+}
+
 // NewTxn returns a new Txn for bucket key.
 func (b *Buckets) NewTxn(thread core.ID, key string, identity did.Token) (*Txn, error) {
 	if err := thread.Validate(); err != nil {

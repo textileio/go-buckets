@@ -1,17 +1,18 @@
 package pinning
 
-// @todo: Add delegates field to responses
-// @todo: Leverage origins when setting path
-
 import (
 	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	c "github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	iface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/libp2p/go-libp2p-core/peer"
+	maddr "github.com/multiformats/go-multiaddr"
 	"github.com/textileio/go-buckets"
 	openapi "github.com/textileio/go-buckets/pinning/openapi/go"
 	q "github.com/textileio/go-buckets/pinning/queue"
@@ -30,6 +31,8 @@ var (
 	PinTimeout = time.Hour
 
 	statusTimeout = time.Minute
+
+	connectTimeout = time.Second * 10
 )
 
 // Service provides a bucket-based IPFS Pinning Service based on the OpenAPI spec:
@@ -37,6 +40,7 @@ var (
 type Service struct {
 	lib   *buckets.Buckets
 	queue *q.Queue
+	addrs []string
 }
 
 // NewService returns a new pinning Service.
@@ -75,6 +79,14 @@ func (s *Service) ListPins(
 		return nil, fmt.Errorf("listing requests: %v", err)
 	}
 
+	delegates, err := s.getDelegates()
+	if err != nil {
+		return nil, fmt.Errorf("getting delegates: %v", err)
+	}
+	for _, r := range list {
+		r.Delegates = delegates
+	}
+
 	log.Debugf("listed %d requests in %s", len(list), key)
 	return list, nil
 }
@@ -109,6 +121,11 @@ func (s *Service) AddPin(
 	})
 	if err != nil {
 		return nil, fmt.Errorf("adding request: %v", err)
+	}
+
+	r.Delegates, err = s.getDelegates()
+	if err != nil {
+		return nil, fmt.Errorf("getting delegates: %v", err)
 	}
 
 	log.Debugf("added request %s in %s", r.Requestid, key)
@@ -150,9 +167,13 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 			return fail(fmt.Errorf("removing path %s: %v", r.Requestid, err))
 		}
 	} else {
-		// Replace placeholder at path with openapi.Pin.Cid
 		pctx, pcancel := context.WithTimeout(ctx, PinTimeout)
 		defer pcancel()
+
+		// Connect to Pin.Origins
+		go s.connectOrigins(pctx, r.Pin.Origins)
+
+		// Replace placeholder at path with openapi.Pin.Cid
 		if _, _, err := txn.SetPath(
 			pctx,
 			nil,
@@ -221,6 +242,11 @@ func (s *Service) GetPin(
 		return nil, fmt.Errorf("getting request: %w", err)
 	}
 
+	r.Delegates, err = s.getDelegates()
+	if err != nil {
+		return nil, fmt.Errorf("getting delegates: %v", err)
+	}
+
 	log.Debugf("got request %s in %s", id, key)
 	return r, nil
 }
@@ -251,6 +277,11 @@ func (s *Service) ReplacePin(
 		return nil, fmt.Errorf("replacing request: %w", err)
 	}
 
+	r.Delegates, err = s.getDelegates()
+	if err != nil {
+		return nil, fmt.Errorf("getting delegates: %v", err)
+	}
+
 	log.Debugf("replaced request %s in %s", id, key)
 	return r, nil
 }
@@ -276,4 +307,92 @@ func (s *Service) RemovePin(
 
 	log.Debugf("removed request %s in %s", id, key)
 	return nil
+}
+
+func (s *Service) connectOrigins(ctx context.Context, origins []string) {
+	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for _, o := range origins {
+		wg.Add(1)
+		go func(o string) {
+			defer wg.Done()
+			pinfo, err := peerInfoFromOrigin(o)
+			if err != nil {
+				log.Errorf("error %v", err)
+				return
+			}
+			if err := s.lib.Ipfs().Swarm().Connect(ctx, *pinfo); err != nil {
+				log.Debugf("error connecting to %s: %v", pinfo.ID, err)
+			} else {
+				log.Debugf("connected to %s", pinfo.ID)
+			}
+		}(o)
+	}
+	wg.Wait()
+}
+
+func peerInfoFromOrigin(origin string) (*peer.AddrInfo, error) {
+	addr, err := maddr.NewMultiaddr(origin)
+	if err != nil {
+		return nil, fmt.Errorf("decoding origin: %v", err)
+	}
+	parts := maddr.Split(addr)
+	if len(parts) == 0 {
+		return nil, errors.New("origin has zero components")
+	}
+	var p2p maddr.Multiaddr
+	p2p, parts = parts[len(parts)-1], parts[:len(parts)-1]
+	p2pv, err := p2p.ValueForProtocol(maddr.P_P2P)
+	if err != nil {
+		return nil, fmt.Errorf("origin missing p2p component: %v", err)
+	}
+	pid, err := peer.Decode(p2pv)
+	if err != nil {
+		return nil, fmt.Errorf("getting peer id: %v", err)
+	}
+	return &peer.AddrInfo{
+		ID: pid,
+		Addrs: []maddr.Multiaddr{
+			maddr.Join(parts...),
+		},
+	}, nil
+}
+
+func (s *Service) getDelegates() ([]string, error) {
+	if len(s.addrs) != 0 {
+		return s.addrs, nil
+	}
+	addrs, err := GetLocalAddrs(s.lib.Ipfs())
+	if err != nil {
+		return nil, fmt.Errorf("getting ipfs local addrs: %v", err)
+	}
+	for _, a := range addrs {
+		addr := a.String()
+		// if !strings.Contains(addr, "localhost") && !strings.Contains(addr, "127.0.0.1") {
+		s.addrs = append(s.addrs, addr)
+		// }
+	}
+	return s.addrs, nil
+}
+
+func GetLocalAddrs(ipfs iface.CoreAPI) ([]maddr.Multiaddr, error) {
+	key, err := ipfs.Key().Self(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	paddr, err := maddr.NewMultiaddr("/p2p/" + key.ID().String())
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := ipfs.Swarm().LocalAddrs(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	paddrs := make([]maddr.Multiaddr, len(addrs))
+	for i, a := range addrs {
+		paddrs[i] = a.Encapsulate(paddr)
+	}
+	return paddrs, nil
 }
