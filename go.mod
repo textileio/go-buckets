@@ -94,3 +94,5 @@ require (
 	gopkg.in/ini.v1 v1.55.0 // indirect
 	honnef.co/go/tools v0.0.1-2020.1.4 // indirect
 )
+
+replace github.com/ipfs/go-pinning-service-http-client => github.com/textileio/go-pinning-service-http-client v0.1.1-0.20210328174252-bc12e73b9a56

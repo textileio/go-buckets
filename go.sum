@@ -467,8 +467,6 @@ github.com/ipfs/go-peertaskqueue v0.1.0/go.mod h1:Jmk3IyCcfl1W3jTW3YpghSwSEC6IJ3
 github.com/ipfs/go-peertaskqueue v0.1.1/go.mod h1:Jmk3IyCcfl1W3jTW3YpghSwSEC6IJ3Vzz/jUmWw8Z0U=
 github.com/ipfs/go-peertaskqueue v0.2.0 h1:2cSr7exUGKYyDeUyQ7P/nHPs9P7Ht/B+ROrpN1EJOjc=
 github.com/ipfs/go-peertaskqueue v0.2.0/go.mod h1:5/eNrBEbtSKWCG+kQK8K8fGNixoYUnr+P7jivavs9lY=
-github.com/ipfs/go-pinning-service-http-client v0.1.0 h1:Au0P4NglL5JfzhNSZHlZ1qra+IcJyO3RWMd9EYCwqSY=
-github.com/ipfs/go-pinning-service-http-client v0.1.0/go.mod h1:tcCKmlkWWH9JUUkKs8CrOZBanacNc1dmKLfjlyXAMu4=
 github.com/ipfs/go-todocounter v0.0.1/go.mod h1:l5aErvQc8qKE2r7NDMjmq5UNAvuZy0rC8BHOplkWvZ4=
 github.com/ipfs/go-unixfs v0.2.4 h1:6NwppOXefWIyysZ4LR/qUBPvXd5//8J3jiMdvpbw6Lo=
 github.com/ipfs/go-unixfs v0.2.4/go.mod h1:SUdisfUjNoSDzzhGVxvCL9QO/nKdwXdr+gbMUdqcbYw=
@@ -1114,6 +1112,8 @@ github.com/textileio/go-ds-badger3 v0.0.0-20210324034212-7b7fb3be3d1c/go.mod h1:
 github.com/textileio/go-ds-mongo v0.1.4/go.mod h1:Zf6JlMPiIQUUmGlFFn5Z65C9p9LAvPg7XvX+qdGmTsU=
 github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5 h1:wy2WAFw2u0RAh7Mnlnh7/Hmc9LlSADDHLlPNZQDBvmM=
 github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5/go.mod h1:Zf6JlMPiIQUUmGlFFn5Z65C9p9LAvPg7XvX+qdGmTsU=
+github.com/textileio/go-pinning-service-http-client v0.1.1-0.20210328174252-bc12e73b9a56 h1:N5fTfazIM6XCKO7BB4RFP0dfOyjATrhsGUTl+jsq9rs=
+github.com/textileio/go-pinning-service-http-client v0.1.1-0.20210328174252-bc12e73b9a56/go.mod h1:tcCKmlkWWH9JUUkKs8CrOZBanacNc1dmKLfjlyXAMu4=
 github.com/textileio/go-threads v1.0.3-0.20210328215802-73e0ec0d7c6d h1:zgw6fo8yjlOb5l3ohgWVKcbKaeQSgn8+19Ggbz4wSRQ=
 github.com/textileio/go-threads v1.0.3-0.20210328215802-73e0ec0d7c6d/go.mod h1:1H3qvMKLuyuAvPmUTFGlohjBWdguzXATouiNQNXBgdo=
 github.com/texttheater/golang-levenshtein v0.0.0-20180516184445-d188e65d659e/go.mod h1:XDKHRm5ThF8YJjx001LtgelzsoaEcvnA7lVWz9EeX3g=

@@ -269,8 +269,7 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 
 	if !query.After.IsZero() {
 		order = dsq.OrderByKey{}
-		// Bump up to next second since 'after' has been rounded down due to limited resolution
-		seek, err = q.NewID(query.After.Add(time.Second))
+		seek, err = q.NewID(query.After.Add(time.Millisecond))
 		if err != nil {
 			return nil, fmt.Errorf("getting 'after' id: %v", err)
 		}
@@ -278,7 +277,7 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 		if query.Before.IsZero() {
 			seek = strings.ToLower(ulid.MustNew(ulid.MaxTime(), nil).String())
 		} else {
-			seek, err = q.NewID(query.Before)
+			seek, err = q.NewID(query.Before.Add(-time.Millisecond))
 			if err != nil {
 				return nil, fmt.Errorf("getting 'before' id: %v", err)
 			}

@@ -78,8 +78,8 @@ func Test_ListPins(t *testing.T) {
 	gw := newGateway(t)
 
 	t.Run("pagination", func(t *testing.T) {
-		numBatches := 5
-		batchSize := 20 // Must be an even number
+		numBatches := 3
+		batchSize := 10 // Must be an even number
 		total := numBatches * batchSize
 
 		files := make([]path.Resolved, total)
@@ -100,7 +100,7 @@ func Test_ListPins(t *testing.T) {
 					i := i
 					j := i + (b * batchSize)
 					f := files[j]
-					time.Sleep(time.Second * 2)
+					time.Sleep(time.Second)
 					eg.Go(func() error {
 						if gctx.Err() != nil {
 							return nil
@@ -115,7 +115,7 @@ func Test_ListPins(t *testing.T) {
 			}(c, b)
 		}
 
-		time.Sleep(time.Minute) // Allow time for requests to be added
+		time.Sleep(time.Second * 30) // Allow time for requests to be added
 
 		// Test pagination
 		for _, c := range clients {

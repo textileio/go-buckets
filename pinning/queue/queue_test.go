@@ -52,8 +52,7 @@ func TestQueue_ListRequests(t *testing.T) {
 		key := newBucketkey(t)
 		ids := make([]string, limit)
 		for i := 0; i < limit; i++ {
-			// Pagination is not possible at sub second resolution due limits in the API spec
-			now = now.Add(time.Second * 2)
+			now = now.Add(time.Millisecond * 10)
 			p := newParams(key, now, time.Millisecond, succeed)
 			r, err := q.AddRequest(p)
 			require.NoError(t, err)
@@ -79,7 +78,7 @@ func TestQueue_ListRequests(t *testing.T) {
 		assert.Equal(t, ids[limit-10], l[9].Requestid)
 
 		// Get next page, should return next 10 records
-		before := time.Unix(l[len(l)-1].Created.Unix(), 0) // limit to second resolution to mimic the http client
+		before := l[len(l)-1].Created
 		l, err = q.ListRequests(key, Query{Statuses: []openapi.Status{openapi.PINNED}, Before: before})
 		require.NoError(t, err)
 		assert.Len(t, l, 10)
@@ -87,7 +86,7 @@ func TestQueue_ListRequests(t *testing.T) {
 		assert.Equal(t, ids[limit-20], l[9].Requestid)
 
 		// Get previous page, should return the first page in reverse order
-		after := time.Unix(l[0].Created.Unix(), 0)
+		after := l[0].Created
 		l, err = q.ListRequests(key, Query{Statuses: []openapi.Status{openapi.PINNED}, After: after})
 		require.NoError(t, err)
 		assert.Len(t, l, 10)
