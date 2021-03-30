@@ -120,9 +120,12 @@ github.com/dgraph-io/badger v1.6.0/go.mod h1:zwt7syl517jmP8s94KqSxTlM6IMsdhYy6ps
 github.com/dgraph-io/badger v1.6.1/go.mod h1:FRmFw3uxvcpa8zG3Rxs0th+hCLIuaQg8HlNV5bjgnuU=
 github.com/dgraph-io/badger v1.6.2 h1:mNw0qs90GVgGGWylh0umH5iag1j6n/PeJtNvL6KY/x8=
 github.com/dgraph-io/badger v1.6.2/go.mod h1:JW2yswe3V058sS0kZ2h/AXeDSqFjxnZcRrVH//y2UQE=
+github.com/dgraph-io/badger/v2 v2.2007.2 h1:EjjK0KqwaFMlPin1ajhP943VPENHJdEz1KLIegjaI3k=
+github.com/dgraph-io/badger/v2 v2.2007.2/go.mod h1:26P/7fbL4kUZVEVKLAKXkBXKOydDmM2p1e+NhhnBCAE=
 github.com/dgraph-io/badger/v3 v3.2011.1 h1:Hmyof0WMEF/QtutX5SQHzIMnJQxb/IrSzhjckV2SD6g=
 github.com/dgraph-io/badger/v3 v3.2011.1/go.mod h1:0rLLrQpKVQAL0or/lBLMQznhr6dWWX7h5AKnmnqx268=
 github.com/dgraph-io/ristretto v0.0.2/go.mod h1:KPxhHT9ZxKefz+PCeOGsrHpl1qZ7i70dGTu2u+Ahh6E=
+github.com/dgraph-io/ristretto v0.0.3-0.20200630154024-f66de99634de/go.mod h1:KPxhHT9ZxKefz+PCeOGsrHpl1qZ7i70dGTu2u+Ahh6E=
 github.com/dgraph-io/ristretto v0.0.4-0.20210122082011-bb5d392ed82d h1:eQYOG6A4td1tht0NdJB9Ls6DsXRGb2Ft6X9REU/MbbE=
 github.com/dgraph-io/ristretto v0.0.4-0.20210122082011-bb5d392ed82d/go.mod h1:tv2ec8nA7vRpSYX7/MbP52ihrUMXIHit54CQMq8npXQ=
 github.com/dgrijalva/jwt-go v3.2.0+incompatible h1:7qlOGliEKZXTDg6OTjfoBKDXWrumCAMpl/TFQ4/5kLM=
@@ -1107,6 +1110,8 @@ github.com/textileio/go-assets v0.0.0-20200430191519-b341e634e2b7 h1:J7+UXJT/Ku8
 github.com/textileio/go-assets v0.0.0-20200430191519-b341e634e2b7/go.mod h1:j7aKMh8sbbtvttp7V7yCOkHW/pfRtIM/6h+8qEDsLyI=
 github.com/textileio/go-datastore-extensions v1.0.1 h1:qIJGqJaigQ1wD4TdwS/hf73u0HChhXvvUSJuxBEKS+c=
 github.com/textileio/go-datastore-extensions v1.0.1/go.mod h1:Pzj9FDRkb55910dr/FX8M7WywvnS26gBgEDez1ZBuLE=
+github.com/textileio/go-ds-badger2 v0.1.1-0.20210324034300-48cd2b3a5771 h1:DCj+k17cvJ1+G3XJof8f3/V+NU6fBZHNSRWzBEdUyAU=
+github.com/textileio/go-ds-badger2 v0.1.1-0.20210324034300-48cd2b3a5771/go.mod h1:bl6k74nrLO6Rnarop6iUG+ZwiREsrTeJTfHWx3bQCzE=
 github.com/textileio/go-ds-badger3 v0.0.0-20210324034212-7b7fb3be3d1c h1:iOWa9/AXFssCi7VhbEvVkpCYXqq/n3E2zKH6u+9pIfM=
 github.com/textileio/go-ds-badger3 v0.0.0-20210324034212-7b7fb3be3d1c/go.mod h1:VX3oCNk7szANGG+baANuhTx7dheWiEPH7lp1n69ef4M=
 github.com/textileio/go-ds-mongo v0.1.4/go.mod h1:Zf6JlMPiIQUUmGlFFn5Z65C9p9LAvPg7XvX+qdGmTsU=
@@ -1114,8 +1119,8 @@ github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5 h1:wy2WAFw
 github.com/textileio/go-ds-mongo v0.1.5-0.20201230201018-2b7fdca787a5/go.mod h1:Zf6JlMPiIQUUmGlFFn5Z65C9p9LAvPg7XvX+qdGmTsU=
 github.com/textileio/go-pinning-service-http-client v0.1.1-0.20210328174252-bc12e73b9a56 h1:N5fTfazIM6XCKO7BB4RFP0dfOyjATrhsGUTl+jsq9rs=
 github.com/textileio/go-pinning-service-http-client v0.1.1-0.20210328174252-bc12e73b9a56/go.mod h1:tcCKmlkWWH9JUUkKs8CrOZBanacNc1dmKLfjlyXAMu4=
-github.com/textileio/go-threads v1.0.3-0.20210328215802-73e0ec0d7c6d h1:zgw6fo8yjlOb5l3ohgWVKcbKaeQSgn8+19Ggbz4wSRQ=
-github.com/textileio/go-threads v1.0.3-0.20210328215802-73e0ec0d7c6d/go.mod h1:1H3qvMKLuyuAvPmUTFGlohjBWdguzXATouiNQNXBgdo=
+github.com/textileio/go-threads v1.0.3-0.20210330050651-1adcc04850d8 h1:zieSMSOGNWSE8qCiaO4UTI1PSOIZuICSrXPPtvnF5lg=
+github.com/textileio/go-threads v1.0.3-0.20210330050651-1adcc04850d8/go.mod h1:LmNmZ7/3u7bf+iBjmjq4N9zOWcquVfVZY5G7fkSrVF4=
 github.com/texttheater/golang-levenshtein v0.0.0-20180516184445-d188e65d659e/go.mod h1:XDKHRm5ThF8YJjx001LtgelzsoaEcvnA7lVWz9EeX3g=
 github.com/tidwall/gjson v1.3.5 h1:2oW9FBNu8qt9jy5URgrzsVx/T/KSn3qn/smJQ0crlDQ=
 github.com/tidwall/gjson v1.3.5/go.mod h1:P256ACg0Mn+j1RXIDXoss50DeIABTYK1PULOJHhxOls=
