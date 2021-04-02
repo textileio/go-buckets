@@ -32,6 +32,7 @@ func (r *pathReader) Close() error {
 	return nil
 }
 
+// PullPath returns a reader to a bucket path.
 func (b *Buckets) PullPath(
 	ctx context.Context,
 	thread core.ID,
@@ -105,6 +106,7 @@ func (b *Buckets) PullPath(
 	return r, nil
 }
 
+// PullIPFSPath returns a reader to an IPFS path.
 func (b *Buckets) PullIPFSPath(ctx context.Context, pth string) (io.ReadCloser, error) {
 	node, err := b.ipfs.Unixfs().Get(ctx, path.New(pth))
 	if err != nil {

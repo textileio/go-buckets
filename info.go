@@ -11,6 +11,8 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// PushPathInfo pushes arbitrary info/metadata to a path,
+// allowing users to add application specific path metadata.
 func (b *Buckets) PushPathInfo(
 	ctx context.Context,
 	thread core.ID,
@@ -28,6 +30,7 @@ func (b *Buckets) PushPathInfo(
 	return txn.PushPathInfo(ctx, root, pth, info)
 }
 
+// PushPathInfo is Txn based PushPathInfo.
 func (t *Txn) PushPathInfo(
 	ctx context.Context,
 	root path.Resolved,
@@ -84,6 +87,7 @@ func (t *Txn) PushPathInfo(
 	return instanceToBucket(t.thread, instance), nil
 }
 
+// PullPathInfo pulls all info at a path.
 func (b *Buckets) PullPathInfo(
 	ctx context.Context,
 	thread core.ID,

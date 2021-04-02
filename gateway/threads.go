@@ -12,7 +12,6 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
-// threadHandler handles thread requests.
 func (g *Gateway) threadHandler(c *gin.Context) {
 	thread, err := core.Decode(c.Param("thread"))
 	if err != nil {
@@ -22,7 +21,6 @@ func (g *Gateway) threadHandler(c *gin.Context) {
 	g.renderThread(c, thread)
 }
 
-// renderThread renders all buckets in a thread.
 func (g *Gateway) renderThread(c *gin.Context, thread core.ID) {
 	token := did.Token(c.Query("token"))
 

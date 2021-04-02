@@ -56,7 +56,7 @@ func NewBuckets(c *client.Client, config cmd.ConfConfig) *Buckets {
 	return &Buckets{c: c, config: config}
 }
 
-// Clients returns the underlying client object.
+// Client returns the underlying client object.
 func (b *Buckets) Client() *client.Client {
 	return b.c
 }

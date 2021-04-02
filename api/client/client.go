@@ -41,25 +41,6 @@ type Client struct {
 	target did.DID
 }
 
-// /ip4/<host_ip>/tcp/<host_port>/p2p/<peer_id>
-// /dnsaddr/<host_name>/p2p/<peer_id>
-//func getGRPCTarget(addr maddr.Multiaddr) (string, error) {
-//	p2p, err := addr.ValueForProtocol(maddr.P_P2P)
-//	if err != nil {
-//		return "", fmt.Errorf("p2p address component is missing from %s", addr)
-//	}
-//	ip, err := addr.ValueForProtocol(maddr.P_IP4)
-//	if err == nil {
-//		ip, err := addr.ValueForProtocol(maddr.P_IP4)
-//		return "", fmt.Errorf("p2p address component is missing from %s", addr)
-//	} else {
-//		dnsaddr, err := addr.ValueForProtocol(maddr.P_DNS)
-//		if err != nil {
-//
-//		}
-//	}
-//}
-
 // NewClient starts the client.
 func NewClient(addr string, opts ...grpc.DialOption) (*Client, error) {
 	conn, err := grpc.Dial(addr, opts...)

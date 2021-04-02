@@ -16,10 +16,12 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// UploadTimeout is the max time taken to push files to a bucket.
 var UploadTimeout = time.Hour
 
 const chunkSize = 1024 * 32
 
+// PostError wraps errors as JSON.
 type PostError struct {
 	Error string `json:"error"`
 }
@@ -29,18 +31,30 @@ type chanErr struct {
 	err  error
 }
 
+// PushPathsResult wraps a single path result.
 type PushPathsResult struct {
 	Path string `json:"path"`
 	Cid  string `json:"cid"`
 	Size int64  `json:"size"`
 }
 
+// PushPathsResults wraps all path results.
 type PushPathsResults struct {
 	Results []PushPathsResult `json:"results"`
 	Pinned  int64             `json:"pinned"`
 	Bucket  *buckets.Bucket   `json:"bucket"`
 }
 
+// bucketPushPathsHandler handles bucket pushes over HTTP.
+//
+// For example:
+// > curl -H "Authorization: Bearer <DID JWT>" \
+//        -F push=@<path/to/file1> \
+//        -F push=@<path/to/file2> \
+//        http://127.0.0.1:8000/b/<bucket_key>
+//
+// To ensure updates are fast-forward-only, use the root query param on the request URL:
+//   ?root=/ipfs/<current_bucket_root>
 func (g *Gateway) bucketPushPathsHandler(c *gin.Context) {
 	thread, err := g.getThread(c)
 	if err != nil {

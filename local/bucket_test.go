@@ -76,18 +76,6 @@ func TestBucket(t *testing.T) {
 		assert.NotEmpty(t, links.IPNS)
 	})
 
-	//t.Run("DBInfo", func(t *testing.T) {
-	//	dbinfo, cc, err := buck.DBInfo(context.Background())
-	//	require.NoError(t, err)
-	//	assert.True(t, dbinfo.Key.Defined())
-	//	assert.NotEmpty(t, dbinfo.Addrs)
-	//	assert.NotEmpty(t, cc.Name)
-	//	assert.NotEmpty(t, cc.Schema)
-	//	assert.NotEmpty(t, cc.WriteValidator)
-	//	assert.NotEmpty(t, cc.ReadFilter)
-	//	assert.NotEmpty(t, cc.Indexes)
-	//})
-
 	t.Run("Destroy", func(t *testing.T) {
 		err = buck.Destroy(context.Background())
 		require.NoError(t, err)

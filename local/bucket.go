@@ -198,28 +198,6 @@ func (b *Bucket) RemoteLinks(ctx context.Context, pth string) (links buckets.Lin
 	return links, err
 }
 
-//// DBInfo returns info about the bucket's ThreadDB.
-//// This info can be used to add replicas or additional peers to the bucket.
-//func (b *Bucket) DBInfo(ctx context.Context) (info db.Info, cc db.CollectionConfig, err error) {
-//	ctx, err = b.auth(ctx)
-//	if err != nil {
-//		return
-//	}
-//	id, err := b.Thread()
-//	if err != nil {
-//		return
-//	}
-//	info, err = b.c.Threads.GetDBInfo(ctx, id)
-//	if err != nil {
-//		return
-//	}
-//	cc, err = b.c.Threads.GetCollectionInfo(ctx, id, collection.Name)
-//	if err != nil {
-//		return
-//	}
-//	return info, cc, nil
-//}
-
 // CatRemotePath writes the content of the remote path to writer.
 func (b *Bucket) CatRemotePath(ctx context.Context, pth string, w io.Writer) error {
 	ctx, err := b.authCtx(ctx)

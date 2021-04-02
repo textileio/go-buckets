@@ -30,10 +30,33 @@ var (
 	// PinTimeout is the max time taken to pin a Cid.
 	PinTimeout = time.Hour
 
+	// statusTimeout is the timeout used when updating pin status in a bucket.
 	statusTimeout = time.Minute
 
+	// connectTimeout is the timeout used when connecting to pin origins.
 	connectTimeout = time.Second * 10
 )
+
+// GetLocalAddrs returns a list of addresses announced by the ipfs instance.
+func GetLocalAddrs(ipfs iface.CoreAPI) ([]maddr.Multiaddr, error) {
+	key, err := ipfs.Key().Self(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	paddr, err := maddr.NewMultiaddr("/p2p/" + key.ID().String())
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := ipfs.Swarm().LocalAddrs(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	paddrs := make([]maddr.Multiaddr, len(addrs))
+	for i, a := range addrs {
+		paddrs[i] = a.Encapsulate(paddr)
+	}
+	return paddrs, nil
+}
 
 // Service provides a bucket-based IPFS Pinning Service based on the OpenAPI spec:
 // https://github.com/ipfs/pinning-services-api-spec
@@ -163,7 +186,9 @@ func (s *Service) handleRequest(ctx context.Context, r q.Request) error {
 		// Remove path from the bucket
 		ctx, cancel := context.WithTimeout(ctx, statusTimeout)
 		defer cancel()
-		if _, _, err := txn.RemovePath(ctx, nil, r.Requestid); err != nil {
+		if _, _, err := txn.RemovePath(ctx, nil, r.Requestid); buckets.IsPathNotFoundErr(err) {
+			return fmt.Errorf("removing path %s: %v", r.Requestid, err)
+		} else if err != nil {
 			return fail(fmt.Errorf("removing path %s: %v", r.Requestid, err))
 		}
 	} else {
@@ -369,30 +394,7 @@ func (s *Service) getDelegates() ([]string, error) {
 		return nil, fmt.Errorf("getting ipfs local addrs: %v", err)
 	}
 	for _, a := range addrs {
-		addr := a.String()
-		// if !strings.Contains(addr, "localhost") && !strings.Contains(addr, "127.0.0.1") {
-		s.addrs = append(s.addrs, addr)
-		// }
+		s.addrs = append(s.addrs, a.String())
 	}
 	return s.addrs, nil
-}
-
-func GetLocalAddrs(ipfs iface.CoreAPI) ([]maddr.Multiaddr, error) {
-	key, err := ipfs.Key().Self(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	paddr, err := maddr.NewMultiaddr("/p2p/" + key.ID().String())
-	if err != nil {
-		return nil, err
-	}
-	addrs, err := ipfs.Swarm().LocalAddrs(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	paddrs := make([]maddr.Multiaddr, len(addrs))
-	for i, a := range addrs {
-		paddrs[i] = a.Encapsulate(paddr)
-	}
-	return paddrs, nil
 }

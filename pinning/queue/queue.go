@@ -1,8 +1,8 @@
 package queue
 
-// @todo: Add doc strings
 // @todo: Handle reload in-progress pins after shutdown
-// @todo: Batch jobs by key, then handler can directly fetch cids and use PushPaths to save bucket writes
+// @todo: Delete did.Token from request after success/fail
+// @todo: Batch jobs by key, then handler can directly fetch cids with IPFS and use PushPaths to save bucket writes
 
 import (
 	"bytes"
@@ -45,16 +45,19 @@ var (
 	// Structure: /queue/<requestid>
 	dsQueuePrefix = ds.NewKey("/queue")
 
-	// dsBucketPrefix is the prefix for grouped time-ordered keys used to list requests.
+	// dsGroupPrefix is the prefix for grouped time-ordered keys used to list requests.
 	// Structure: /group/<groupkey>/<requestid>
-	dsBucketPrefix = ds.NewKey("/group")
+	dsGroupPrefix = ds.NewKey("/group")
 )
 
 const (
+	// defaultListLimit is the default request list page size.
 	defaultListLimit = 10
-	maxListLimit     = 1000
+	// maxListLimit is the max request list page size.
+	maxListLimit = 1000
 )
 
+// Request is a wrapper for openapi.PinStatus that is persisted to the datastore.
 type Request struct {
 	openapi.PinStatus
 
@@ -62,12 +65,17 @@ type Request struct {
 	Key      string
 	Identity did.Token
 
+	// Replace indicates openapi.PinStatus.Pin.Cid is marked for replacement.
 	Replace bool
-	Remove  bool
+	// Remove indicates the request is marked for removal.
+	Remove bool
 }
 
+// RequestParams are used to create a new request.
 type RequestParams struct {
 	openapi.Pin
+
+	// Time the request was received (used for openapi.PinStatus.Created).
 	Time time.Time
 
 	Thread   core.ID
@@ -75,6 +83,7 @@ type RequestParams struct {
 	Identity did.Token
 }
 
+// Query is used to query for requests (a more typed version of openapi.Query).
 type Query struct {
 	Cids     []string
 	Name     string
@@ -103,8 +112,11 @@ func (q Query) setDefaults() Query {
 	return q
 }
 
+// Handler is called when a request moves from "queued" to "pinning".
+// This separates the queue's job from the actual handling of a request, making the queue logic easier to test.
 type Handler func(ctx context.Context, request Request) error
 
+// Queue is a persistent worker-based task queue.
 type Queue struct {
 	store kt.TxnDatastoreExtended
 
@@ -119,6 +131,7 @@ type Queue struct {
 	lk sync.Mutex
 }
 
+// NewQueue returns a new Queue using handler to process requests.
 func NewQueue(store kt.TxnDatastoreExtended, handler Handler) (*Queue, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	q := &Queue{
@@ -139,11 +152,13 @@ func NewQueue(store kt.TxnDatastoreExtended, handler Handler) (*Queue, error) {
 	return q, nil
 }
 
+// Close the queue and cancel active "pinning" requests.
 func (q *Queue) Close() error {
 	q.cancel()
 	return nil
 }
 
+// NewID returns new monotonically increasing request ids.
 func (q *Queue) NewID(t time.Time) (string, error) {
 	q.lk.Lock() // entropy is not safe for concurrent use
 
@@ -163,6 +178,7 @@ func (q *Queue) NewID(t time.Time) (string, error) {
 	return strings.ToLower(id.String()), nil
 }
 
+// cidFilter is used to query for one or more requests with a particular openapi.PinStatus.Pin.Cid.
 type cidFilter struct {
 	ok []string
 }
@@ -181,6 +197,7 @@ func (f *cidFilter) Filter(e dsq.Entry) bool {
 	return false
 }
 
+// nameFilter is used to query for one or more requests with a particular openapi.PinStatus.Pin.Name.
 type nameFilter struct {
 	name  string
 	match openapi.TextMatchingStrategy
@@ -206,6 +223,7 @@ func (f *nameFilter) Filter(e dsq.Entry) bool {
 	}
 }
 
+// statusFilter is used to query for one or more requests with a particular openapi.PinStatus.Status.
 type statusFilter struct {
 	ok []openapi.Status
 }
@@ -224,6 +242,7 @@ func (f *statusFilter) Filter(e dsq.Entry) bool {
 	return false
 }
 
+// metaFilter is used to query for one or more requests with matching openapi.PinStatus.Pin.Meta.
 type metaFilter struct {
 	meta map[string]string
 }
@@ -252,8 +271,8 @@ loop:
 	return match
 }
 
-// ListRequests lists requests for key by applying a Query.
-func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, error) {
+// ListRequests lists requests for a group key by applying a Query.
+func (q *Queue) ListRequests(group string, query Query) ([]openapi.PinStatus, error) {
 	query = query.setDefaults()
 	if !query.Before.IsZero() && !query.After.IsZero() {
 		return nil, errors.New("before and after cannot be used together")
@@ -283,7 +302,7 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 			}
 		}
 	}
-	seekKey = getBucketKey(key, seek).String()
+	seekKey = getGroupKey(group, seek).String()
 
 	if len(query.Cids) > 0 {
 		filters = append(filters, &cidFilter{
@@ -309,7 +328,7 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 
 	results, err := q.store.QueryExtended(dsextensions.QueryExt{
 		Query: dsq.Query{
-			Prefix:  dsBucketPrefix.ChildString(key).String(),
+			Prefix:  dsGroupPrefix.ChildString(group).String(),
 			Filters: filters,
 			Orders:  []dsq.Order{order},
 			Limit:   limit,
@@ -336,6 +355,8 @@ func (q *Queue) ListRequests(key string, query Query) ([]openapi.PinStatus, erro
 	return reqs, nil
 }
 
+// AddRequest adds a new request to the queue.
+// The new request will be handled immediately if workers are not busy.
 func (q *Queue) AddRequest(params RequestParams) (*openapi.PinStatus, error) {
 	id, err := q.NewID(params.Time)
 	if err != nil {
@@ -359,16 +380,17 @@ func (q *Queue) AddRequest(params RequestParams) (*openapi.PinStatus, error) {
 	return &r.PinStatus, nil
 }
 
-func (q *Queue) GetRequest(key, id string) (*openapi.PinStatus, error) {
-	r, err := q.getRequest(q.store, key, id)
+// GetRequest returns a request by group key and id.
+func (q *Queue) GetRequest(group, id string) (*openapi.PinStatus, error) {
+	r, err := q.getRequest(q.store, group, id)
 	if err != nil {
 		return nil, err
 	}
 	return &r.PinStatus, err
 }
 
-func (q *Queue) getRequest(reader ds.Read, key, id string) (*Request, error) {
-	val, err := reader.Get(getBucketKey(key, id))
+func (q *Queue) getRequest(reader ds.Read, group, id string) (*Request, error) {
+	val, err := reader.Get(getGroupKey(group, id))
 	if errors.Is(err, ds.ErrNotFound) {
 		return nil, ErrNotFound
 	} else if err != nil {
@@ -381,8 +403,10 @@ func (q *Queue) getRequest(reader ds.Read, key, id string) (*Request, error) {
 	return &r, nil
 }
 
-func (q *Queue) ReplaceRequest(key, id string, pin openapi.Pin) (*openapi.PinStatus, error) {
-	r, err := q.dequeue(key, id)
+// ReplaceRequest replaces a request's openapi.PinStatus.Pin.
+// Note: In-progress ("pinning") requests cannot be replaced.
+func (q *Queue) ReplaceRequest(group, id string, pin openapi.Pin) (*openapi.PinStatus, error) {
+	r, err := q.dequeue(group, id)
 	if err != nil {
 		return nil, fmt.Errorf("dequeueing request: %w", err)
 	}
@@ -399,8 +423,10 @@ func (q *Queue) ReplaceRequest(key, id string, pin openapi.Pin) (*openapi.PinSta
 	return &r.PinStatus, nil
 }
 
-func (q *Queue) RemoveRequest(key, id string) error {
-	r, err := q.dequeue(key, id)
+// RemoveRequest removes a request.
+// Note: In-progress ("pinning") requests cannot be removed.
+func (q *Queue) RemoveRequest(group, id string) error {
+	r, err := q.dequeue(group, id)
 	if err != nil {
 		return fmt.Errorf("dequeueing request: %w", err)
 	}
@@ -425,7 +451,7 @@ func (q *Queue) enqueue(r Request, isNew bool) error {
 		if err != nil {
 			return fmt.Errorf("encoding request: %v", err)
 		}
-		if err := q.store.Put(getBucketKey(r.Key, r.Requestid), val); err != nil {
+		if err := q.store.Put(getGroupKey(r.Key, r.Requestid), val); err != nil {
 			return fmt.Errorf("putting group key: %v", err)
 		}
 	} else {
@@ -450,7 +476,7 @@ func (q *Queue) enqueue(r Request, isNew bool) error {
 	return nil
 }
 
-func (q *Queue) dequeue(key, id string) (*Request, error) {
+func (q *Queue) dequeue(group, id string) (*Request, error) {
 	txn, err := q.store.NewTransactionExtended(false)
 	if err != nil {
 		return nil, fmt.Errorf("creating txn: %v", err)
@@ -458,7 +484,7 @@ func (q *Queue) dequeue(key, id string) (*Request, error) {
 	defer txn.Discard()
 
 	// Check if pinning
-	r, err := q.getRequest(txn, key, id)
+	r, err := q.getRequest(txn, group, id)
 	if errors.Is(err, ds.ErrNotFound) {
 		return nil, ErrNotFound
 	} else if err != nil {
@@ -606,7 +632,7 @@ func (q *Queue) moveRequest(r Request, from, to openapi.Status) error {
 	}
 
 	// Update group key
-	if err := txn.Put(getBucketKey(r.Key, r.Requestid), val); err != nil {
+	if err := txn.Put(getGroupKey(r.Key, r.Requestid), val); err != nil {
 		return fmt.Errorf("putting group key: %v", err)
 	}
 
@@ -629,7 +655,7 @@ func (q *Queue) removeRequest(r Request) error {
 	}
 
 	// Remove group key
-	if err := txn.Delete(getBucketKey(r.Key, r.Requestid)); err != nil {
+	if err := txn.Delete(getGroupKey(r.Key, r.Requestid)); err != nil {
 		return fmt.Errorf("deleting group key: %v", err)
 	}
 
@@ -639,8 +665,8 @@ func (q *Queue) removeRequest(r Request) error {
 	return nil
 }
 
-func getBucketKey(key, id string) ds.Key {
-	return dsBucketPrefix.ChildString(key).ChildString(id)
+func getGroupKey(group, id string) ds.Key {
+	return dsGroupPrefix.ChildString(group).ChildString(id)
 }
 
 func encode(r Request) ([]byte, error) {

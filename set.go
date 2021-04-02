@@ -12,6 +12,7 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// SetPath pulls data from IPFS into a bucket path.
 func (b *Buckets) SetPath(
 	ctx context.Context,
 	thread core.ID,
@@ -30,6 +31,7 @@ func (b *Buckets) SetPath(
 	return txn.SetPath(ctx, root, pth, cid, meta)
 }
 
+// SetPath is Txn based SetPath.
 func (t *Txn) SetPath(
 	ctx context.Context,
 	root path.Resolved,

@@ -121,7 +121,6 @@ func (f *bucketFS) ValidHost() string {
 	return f.domain
 }
 
-// renderWWWBucket renders a bucket as a website.
 func (g *Gateway) renderWWWBucket(c *gin.Context, key string) {
 	ipnskey, err := g.ipns.Store().GetByCid(key)
 	if err != nil {

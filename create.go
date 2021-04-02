@@ -14,6 +14,8 @@ import (
 	"github.com/textileio/go-threads/db"
 )
 
+// Create a new bucket using identity.
+// See CreateOption for more details.
 func (b *Buckets) Create(
 	ctx context.Context,
 	identity did.Token,

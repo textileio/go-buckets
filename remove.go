@@ -11,6 +11,8 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// RemovePath removed a path from a bucket.
+// All children under the path will be removed and unpinned.
 func (b *Buckets) RemovePath(
 	ctx context.Context,
 	thread core.ID,
@@ -27,6 +29,7 @@ func (b *Buckets) RemovePath(
 	return txn.RemovePath(ctx, root, pth)
 }
 
+// RemovePath is Txn based RemovePath.
 func (t *Txn) RemovePath(ctx context.Context, root path.Resolved, pth string) (int64, *Bucket, error) {
 	pth, err := parsePath(pth)
 	if err != nil {

@@ -1,6 +1,5 @@
 package buckets
 
-// @todo: Add doc strings
 // @todo: Clean up error messages
 
 import (
@@ -46,6 +45,18 @@ var (
 
 	movePathRegexp = regexp.MustCompile("/ipfs/([^/]+)/")
 )
+
+// IsPathNotFoundErr returns whether or not an error indicates a bucket path was not found.
+// This is needed because public and private (encrypted) buckets can return different
+// errors for the same operation.
+func IsPathNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "could not resolve path") ||
+		strings.Contains(msg, "no link named")
+}
 
 // Bucket adds thread ID to collection.Bucket.
 type Bucket struct {
@@ -146,14 +157,17 @@ func (b *Buckets) Close() error {
 	return nil
 }
 
+// Net returns the underlying thread net client.
 func (b *Buckets) Net() *nc.Client {
 	return b.net
 }
 
+// DB returns the underlying thread db client.
 func (b *Buckets) DB() *dbc.Client {
 	return b.db
 }
 
+// Ipfs returns the underlying IPFS client.
 func (b *Buckets) Ipfs() iface.CoreAPI {
 	return b.ipfs
 }
@@ -174,6 +188,7 @@ func (b *Buckets) NewTxn(thread core.ID, key string, identity did.Token) (*Txn, 
 	}, nil
 }
 
+// Get returns a bucket by thread id and key.
 func (b *Buckets) Get(ctx context.Context, thread core.ID, key string, identity did.Token) (*Bucket, error) {
 	if err := thread.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid thread id: %v", err)
@@ -186,6 +201,7 @@ func (b *Buckets) Get(ctx context.Context, thread core.ID, key string, identity 
 	return instanceToBucket(thread, instance), nil
 }
 
+// GetLinks returns a Links object containing the bucket thread, IPNS, and WWW links by thread and bucket key.
 func (b *Buckets) GetLinks(
 	ctx context.Context,
 	thread core.ID,
@@ -204,6 +220,7 @@ func (b *Buckets) GetLinks(
 	return b.GetLinksForBucket(ctx, instanceToBucket(thread, instance), identity, pth)
 }
 
+// GetLinksForBucket returns a Links object containing the bucket thread, IPNS, and WWW links.
 func (b *Buckets) GetLinksForBucket(
 	ctx context.Context,
 	bucket *Bucket,
@@ -251,6 +268,7 @@ func (b *Buckets) GetLinksForBucket(
 	return links, nil
 }
 
+// List returns all buckets under a thread.
 func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) ([]Bucket, error) {
 	if err := thread.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid thread id: %v", err)
@@ -270,6 +288,7 @@ func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) 
 	return bucks, nil
 }
 
+// Remove removes an entire bucket, unpinning all data.
 func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identity did.Token) (int64, error) {
 	txn, err := b.NewTxn(thread, key, identity)
 	if err != nil {
@@ -279,6 +298,7 @@ func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identi
 	return txn.Remove(ctx)
 }
 
+// Remove is Txn based Remove.
 func (t *Txn) Remove(ctx context.Context) (int64, error) {
 	instance, err := t.b.c.GetSafe(ctx, t.thread, t.key, collection.WithIdentity(t.identity))
 	if err != nil {
@@ -323,15 +343,6 @@ func (b *Buckets) saveAndPublish(
 	}
 	go b.ipns.Publish(path.New(instance.Path), instance.Key)
 	return nil
-}
-
-func IsPathNotFoundErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "could not resolve path") ||
-		strings.Contains(msg, "no link named")
 }
 
 func instanceToBucket(thread core.ID, instance *collection.Bucket) *Bucket {

@@ -20,6 +20,7 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// PushPathsInput is used to with PushPath and PushPaths to specify a reader or chunked data to push to a path.
 type PushPathsInput struct {
 	// Path is a bucket relative path at which to insert data.
 	Path string
@@ -31,6 +32,7 @@ type PushPathsInput struct {
 	Meta map[string]interface{}
 }
 
+// PushPathsResult contains the result of a single push result from PuthPath or PushPaths.
 type PushPathsResult struct {
 	Path   string
 	Cid    c.Cid
@@ -39,6 +41,7 @@ type PushPathsResult struct {
 	Bucket *Bucket
 }
 
+// PushPath pushes data to a single bucket path.
 func (b *Buckets) PushPath(
 	ctx context.Context,
 	thread core.ID,
@@ -55,6 +58,7 @@ func (b *Buckets) PushPath(
 	return txn.PushPath(ctx, root, input)
 }
 
+// PushPath is Txn based PushPath.
 func (t *Txn) PushPath(
 	ctx context.Context,
 	root path.Resolved,
@@ -82,6 +86,10 @@ func (t *Txn) PushPath(
 	}
 }
 
+// PushPaths pushes data to one or more bucket paths.
+// The returned channels are used to push one or more PushPathsInput.
+// Each input will result in a PushPathsResult.
+// Use this method to bulk write data to a bucket.
 func (b *Buckets) PushPaths(
 	ctx context.Context,
 	thread core.ID,
@@ -107,6 +115,7 @@ func (b *Buckets) PushPaths(
 	return in, out, errs
 }
 
+// PushPaths is Txn based PushPaths.
 func (t *Txn) PushPaths(
 	ctx context.Context,
 	root path.Resolved,

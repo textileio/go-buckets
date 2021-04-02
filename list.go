@@ -9,6 +9,7 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// ListPath lists all paths under a path.
 func (b *Buckets) ListPath(
 	ctx context.Context,
 	thread core.ID,
@@ -32,6 +33,7 @@ func (b *Buckets) ListPath(
 	return item, instanceToBucket(thread, instance), nil
 }
 
+// ListIPFSPath lists all paths under a path.
 func (b *Buckets) ListIPFSPath(ctx context.Context, pth string) (*PathItem, error) {
 	log.Debugf("listed ipfs path %s", pth)
 	return b.pathToItem(ctx, nil, path.New(pth), true)

@@ -14,6 +14,9 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// MovePath moves a path to a different location.
+// The destination path does not need to exist.
+// Currently, moving the root path is not possible.
 func (b *Buckets) MovePath(
 	ctx context.Context,
 	thread core.ID,
@@ -30,6 +33,7 @@ func (b *Buckets) MovePath(
 	return txn.MovePath(ctx, root, fpth, tpth)
 }
 
+// MovePath is Txn based MovePath.
 func (t *Txn) MovePath(
 	ctx context.Context,
 	root path.Resolved,

@@ -16,7 +16,6 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
-// bucketHandler handles bucket requests.
 func (g *Gateway) bucketHandler(c *gin.Context) {
 	thread, err := g.getThread(c)
 	if err != nil {
@@ -26,7 +25,6 @@ func (g *Gateway) bucketHandler(c *gin.Context) {
 	g.renderBucket(c, thread, c.Param("key"), c.Param("path"))
 }
 
-// renderBucket renders a bucket instance in a collection.
 func (g *Gateway) renderBucket(c *gin.Context, thread core.ID, key, pth string) {
 	pth = strings.TrimPrefix(pth, "/")
 	token := did.Token(c.Query("token"))

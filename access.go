@@ -14,6 +14,9 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// PushPathAccessRoles pushes new access roles to bucket paths.
+// Access roles are keyed by did.DID.
+// Roles are inherited by path children.
 func (b *Buckets) PushPathAccessRoles(
 	ctx context.Context,
 	thread core.ID,
@@ -31,6 +34,7 @@ func (b *Buckets) PushPathAccessRoles(
 	return txn.PushPathAccessRoles(ctx, root, pth, roles)
 }
 
+// PushPathAccessRoles is Txn based PushPathInfo.
 func (t *Txn) PushPathAccessRoles(
 	ctx context.Context,
 	root path.Resolved,
@@ -153,6 +157,7 @@ func (t *Txn) PushPathAccessRoles(
 	return dag.GetPinnedBytes(ctx), instanceToBucket(t.thread, instance), nil
 }
 
+// PullPathAccessRoles pulls access roles for a bucket path.
 func (b *Buckets) PullPathAccessRoles(
 	ctx context.Context,
 	thread core.ID,
@@ -180,6 +185,7 @@ func (b *Buckets) PullPathAccessRoles(
 	return md.Roles, nil
 }
 
+// IsReadablePath returns whether or not a path is readable by an identity.
 func (b *Buckets) IsReadablePath(
 	ctx context.Context,
 	thread core.ID,
@@ -205,6 +211,7 @@ func (b *Buckets) IsReadablePath(
 	return instance.IsReadablePath(pth, doc.ID), nil
 }
 
+// IsWritablePath returns whether or not a path is writable by an identity.
 func (b *Buckets) IsWritablePath(
 	ctx context.Context,
 	thread core.ID,
