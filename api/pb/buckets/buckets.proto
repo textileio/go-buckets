@@ -26,6 +26,7 @@ message Links {
     string url = 1;
     string www = 2;
     string ipns = 3;
+    string bps = 4;
 }
 
 message Seed {

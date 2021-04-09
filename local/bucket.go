@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/interface-go-ipfs-core/options"
@@ -18,6 +19,7 @@ import (
 	"github.com/textileio/go-buckets/cmd"
 	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-buckets/dag"
+	"github.com/textileio/go-threads/core/did"
 	"github.com/textileio/go-threads/core/thread"
 )
 
@@ -136,7 +138,7 @@ func (b *Bucket) LocalSize() (int64, error) {
 
 // Get returns info about a bucket from the remote.
 func (b *Bucket) Get(ctx context.Context) (bucket buckets.Bucket, err error) {
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}
@@ -181,7 +183,7 @@ func (b *Bucket) RemoteLinks(ctx context.Context, pth string) (links buckets.Lin
 	if b.links != nil {
 		return *b.links, nil
 	}
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}
@@ -200,7 +202,7 @@ func (b *Bucket) RemoteLinks(ctx context.Context, pth string) (links buckets.Lin
 
 // CatRemotePath writes the content of the remote path to writer.
 func (b *Bucket) CatRemotePath(ctx context.Context, pth string, w io.Writer) error {
-	ctx, err := b.authCtx(ctx)
+	ctx, err := b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return err
 	}
@@ -215,7 +217,7 @@ func (b *Bucket) CatRemotePath(ctx context.Context, pth string, w io.Writer) err
 func (b *Bucket) Destroy(ctx context.Context) (err error) {
 	b.Lock()
 	defer b.Unlock()
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}
@@ -233,6 +235,16 @@ func (b *Bucket) Destroy(ctx context.Context) (err error) {
 	_ = os.RemoveAll(filepath.Join(bp, collection.SeedName))
 	_ = os.RemoveAll(filepath.Join(bp, b.conf.Dir))
 	return nil
+}
+
+// GetIdentityToken returns a did.Token for the bucket identity valid for the given duration.
+func (b *Bucket) GetIdentityToken(dur time.Duration) (did.Token, error) {
+	ctx, err := b.authCtx(context.TODO(), dur)
+	if err != nil {
+		return "", err
+	}
+	token, _ := did.TokenFromContext(ctx)
+	return token, nil
 }
 
 func (b *Bucket) loadLocalRepo(ctx context.Context, pth, name string, setCidVersion bool) error {
@@ -278,7 +290,7 @@ func (b *Bucket) containsPath(pth string) (c bool, err error) {
 }
 
 func (b *Bucket) getRemoteRoot(ctx context.Context) (cid.Cid, error) {
-	ctx, err := b.authCtx(ctx)
+	ctx, err := b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -298,10 +310,10 @@ func (b *Bucket) getRemoteRoot(ctx context.Context) (cid.Cid, error) {
 }
 
 // authCtx returns an identity token context for authentication and authorization.
-func (b *Bucket) authCtx(ctx context.Context) (context.Context, error) {
+func (b *Bucket) authCtx(ctx context.Context, dur time.Duration) (context.Context, error) {
 	identity := &thread.Libp2pIdentity{}
 	if err := identity.UnmarshalString(b.conf.Viper.GetString("identity")); err != nil {
 		return nil, err
 	}
-	return authCtx(ctx, b.c, identity)
+	return authCtx(ctx, b.c, identity, dur)
 }

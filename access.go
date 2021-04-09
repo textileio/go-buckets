@@ -172,9 +172,12 @@ func (b *Buckets) PullPathAccessRoles(
 	if err != nil {
 		return nil, err
 	}
-	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, identity, pth)
 	if err != nil {
 		return nil, err
+	}
+	if _, err = dag.GetNodeAtPath(ctx, b.ipfs, bpth, instance.GetLinkEncryptionKey()); err != nil {
+		return nil, fmt.Errorf("could not resolve path: %s", pth)
 	}
 	md, _, ok := instance.GetMetadataForPath(pth, false)
 	if !ok {

@@ -156,6 +156,7 @@ func LinksToPb(links buckets.Links) *pb.Links {
 		Url:  links.URL,
 		Www:  links.WWW,
 		Ipns: links.IPNS,
+		Bps:  links.BPS,
 	}
 }
 
@@ -164,5 +165,6 @@ func LinksFromPb(links *pb.Links) buckets.Links {
 		URL:  links.Url,
 		WWW:  links.Www,
 		IPNS: links.Ipns,
+		BPS:  links.Bps,
 	}
 }

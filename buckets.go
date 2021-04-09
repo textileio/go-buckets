@@ -84,6 +84,8 @@ type Links struct {
 	WWW string `json:"www"`
 	// IPNS is the bucket IPNS address.
 	IPNS string `json:"ipns"`
+	// BPS is the bucket pinning service URL.
+	BPS string `json:"bps"`
 }
 
 // Seed describes a bucket seed file.
@@ -248,7 +250,7 @@ func (b *Buckets) GetLinksForBucket(
 		}
 		linkKey := bucket.GetLinkEncryptionKey()
 		if _, err := dag.GetNodeAtPath(ctx, b.ipfs, npth, linkKey); err != nil {
-			return links, err
+			return links, fmt.Errorf("could not resolve path: %s", pth)
 		}
 		pth = "/" + pth
 		links.URL += pth
@@ -256,6 +258,8 @@ func (b *Buckets) GetLinksForBucket(
 			links.WWW += pth
 		}
 		links.IPNS += pth
+	} else {
+		links.BPS = fmt.Sprintf("%s/bps/%s", GatewayURL, bucket.Key)
 	}
 
 	query := "?token=" + string(identity)

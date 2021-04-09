@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	du "github.com/ipfs/go-merkledag/dagutils"
 	"github.com/ipfs/interface-go-ipfs-core/path"
@@ -18,7 +19,7 @@ import (
 func (b *Bucket) PushLocal(ctx context.Context, opts ...PathOption) (roots Roots, err error) {
 	b.Lock()
 	defer b.Unlock()
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}

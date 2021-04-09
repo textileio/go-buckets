@@ -46,8 +46,10 @@ func Init(baseCmd *cobra.Command) {
 		encryptCmd,
 		decryptCmd,
 		rolesCmd,
+		pinningCmd,
 	)
 	rolesCmd.AddCommand(rolesGrantCmd, rolesLsCmd)
+	pinningCmd.AddCommand(pinningEnableCmd, pinningDisableCmd, pinningAddCmd, pinningRmCmd, pinningLsCmd)
 
 	baseCmd.PersistentFlags().String("key", "", "Bucket key")
 	baseCmd.PersistentFlags().String("thread", "", "Thread ID")
@@ -79,6 +81,8 @@ func Init(baseCmd *cobra.Command) {
 	rolesGrantCmd.Flags().StringP("role", "r", "", "Access role: none, reader, writer, admin")
 
 	linksCmd.Flags().String("format", "default", "Display URL links in the provided format. Options: [default,json]")
+
+	pinningAddCmd.Flags().String("name", "", "Optional pin name")
 }
 
 func SetBucks(b *local.Buckets) {

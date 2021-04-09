@@ -154,7 +154,7 @@ func (b *Buckets) NewBucket(ctx context.Context, conf Config, opts ...NewOption)
 		pushBlock: make(chan struct{}, 1),
 	}
 
-	ctx, err = authCtx(ctx, b.c, conf.Identity)
+	ctx, err = authCtx(ctx, b.c, conf.Identity, time.Hour)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func (b *Buckets) RemoteBuckets(
 	id thread.ID,
 	identity thread.Identity,
 ) (list []buckets.Bucket, err error) {
-	ctx, err = authCtx(ctx, b.c, identity)
+	ctx, err = authCtx(ctx, b.c, identity, time.Hour)
 	if err != nil {
 		return nil, err
 	}
@@ -344,6 +344,11 @@ func (b *Buckets) RemoteBuckets(
 }
 
 // authCtx returns an identity token context for authentication and authorization.
-func authCtx(ctx context.Context, c *client.Client, identity thread.Identity) (context.Context, error) {
-	return c.NewTokenContext(ctx, identity, time.Hour*24)
+func authCtx(
+	ctx context.Context,
+	c *client.Client,
+	identity thread.Identity,
+	dur time.Duration,
+) (context.Context, error) {
+	return c.NewTokenContext(ctx, identity, dur)
 }

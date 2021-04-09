@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/textileio/dcrypto"
 )
@@ -105,7 +106,7 @@ func (b *Bucket) decryptRemotePath(
 	fn decryptFunc,
 	w io.Writer,
 ) error {
-	ctx, err := b.authCtx(ctx)
+	ctx, err := b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return err
 	}

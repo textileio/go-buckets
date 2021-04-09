@@ -252,6 +252,9 @@ func handleServiceErr(c *gin.Context, err error) {
 	if errors.Is(err, queue.ErrNotFound) {
 		newFailure(c, http.StatusNotFound, err)
 		return
+	} else if strings.Contains(err.Error(), "parsing token") {
+		newFailure(c, http.StatusUnauthorized, err)
+		return
 	} else if errors.Is(err, pinning.ErrPermissionDenied) {
 		newFailure(c, http.StatusForbidden, err)
 		return
