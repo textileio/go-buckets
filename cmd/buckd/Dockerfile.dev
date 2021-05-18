@@ -12,7 +12,7 @@ RUN cd $SRC_DIR \
 
 COPY . $SRC_DIR
 
-RUN cd $SRC_DIR \
+RUN --mount=type=cache,target=/root/.cache/go-build cd $SRC_DIR \
   && CGO_ENABLED=0 GOOS=linux go build -gcflags "all=-N -l" -o buckd cmd/buckd/main.go
 
 FROM debian:buster
