@@ -6,6 +6,7 @@ services:
       dockerfile: ./cmd/buckd/Dockerfile.dev
     volumes:
       - "${REPO_PATH}/buckets:/data/buckets"
+    platform: linux/amd64
     environment:
       - BUCK_LOG_DEBUG=true
       - BUCK_ADDR_API=0.0.0.0:5000
@@ -34,11 +35,12 @@ services:
     depends_on:
       - threads
       - ipfs
+    restart: unless-stopped
   threads:
-    image: textile/go-threads:sha-76f6cd6-m1
-    restart: always
+    image: textile/threads:sha-43a1673
     volumes:
       - "${REPO_PATH}/threads:/data/threads"
+    platform: linux/amd64
     environment:
       - THREADS_DEBUG=true
       - THREADS_APIADDR=/ip4/0.0.0.0/tcp/5000
@@ -49,13 +51,16 @@ services:
       - "4066:4006/udp"
       - "127.0.0.1:4050:5050"
       - "127.0.0.1:7000:8000"
+    restart: unless-stopped
   ipfs:
-    image: textile/go-ipfs:v0.8.0-m1
+    image: textile/go-ipfs:sha-ce693d7
     volumes:
       - "${REPO_PATH}/ipfs:/data/ipfs"
+    platform: linux/amd64
     environment:
       - IPFS_PROFILE=test
     ports:
       - "4011:4001"
       - "4011:4001/udp"
       - "127.0.0.1:8081:8080"
+    restart: unless-stopped
