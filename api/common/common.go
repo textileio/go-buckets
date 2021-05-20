@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-var log = logging.Logger("buckets-api")
+var log = logging.Logger("buckets/api")
 
 func GetClientRPCOpts(target string) (opts []grpc.DialOption) {
 	creds := did.RPCCredentials{}

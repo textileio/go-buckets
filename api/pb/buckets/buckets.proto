@@ -3,28 +3,30 @@ package api.pb.buckets;
 option go_package = "github.com/textileio/go-buckets/api/pb/buckets";
 
 message Metadata {
-     string key = 1;
-     map<string, PathAccessRole> roles = 2;
-     int64 updated_at = 3;
+    string key = 1;
+    map<string, PathAccessRole> roles = 2;
+    bytes info = 3;
+    int64 updated_at = 4;
 }
 
 message Bucket {
-     string thread = 1;
-     string key = 2;
-     string owner = 3;
-     string name = 4;
-     int32 version = 5;
-     string link_key = 6;
-     string path = 7;
-     map<string, Metadata> metadata = 8;
-     int64 created_at = 9;
-     int64 updated_at = 10;
+    string thread = 1;
+    string key = 2;
+    string owner = 3;
+    string name = 4;
+    int32 version = 5;
+    string link_key = 6;
+    string path = 7;
+    map<string, Metadata> metadata = 8;
+    int64 created_at = 9;
+    int64 updated_at = 10;
 }
 
 message Links {
     string url = 1;
     string www = 2;
     string ipns = 3;
+    string bps = 4;
 }
 
 message Seed {
@@ -161,8 +163,9 @@ message PullIpfsPathResponse {
 message SetPathRequest {
     string thread = 1;
     string key = 2;
-    string path = 3;
-    string cid = 4;
+    string root = 3;
+    string path = 4;
+    string cid = 5;
 }
 
 message SetPathResponse {
@@ -173,8 +176,9 @@ message SetPathResponse {
 message MovePathRequest {
     string thread = 1;
     string key = 2;
-    string from_path = 3;
-    string to_path = 4;
+    string root = 3;
+    string from_path = 4;
+    string to_path = 5;
 }
 
 message MovePathResponse {
@@ -185,8 +189,8 @@ message MovePathResponse {
 message RemovePathRequest {
     string thread = 1;
     string key = 2;
-    string path = 3;
-    string root = 4;
+    string root = 3;
+    string path = 4;
 }
 
 message RemovePathResponse {
@@ -205,7 +209,8 @@ message PushPathAccessRolesRequest {
     string thread = 1;
     string key = 2;
     string path = 3;
-    map<string, PathAccessRole> roles = 4;
+    string root = 4;
+    map<string, PathAccessRole> roles = 5;
 }
 
 message PushPathAccessRolesResponse {
@@ -221,6 +226,28 @@ message PullPathAccessRolesRequest {
 
 message PullPathAccessRolesResponse {
     map<string, PathAccessRole> roles = 1;
+}
+
+message PushPathInfoRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+    string root = 4;
+    bytes info = 5;
+}
+
+message PushPathInfoResponse {
+    Bucket bucket = 1;
+}
+
+message PullPathInfoRequest {
+    string thread = 1;
+    string key = 2;
+    string path = 3;
+}
+
+message PullPathInfoResponse {
+    bytes info = 1;
 }
 
 service APIService {
@@ -241,4 +268,7 @@ service APIService {
 
     rpc PushPathAccessRoles(PushPathAccessRolesRequest) returns (PushPathAccessRolesResponse) {}
     rpc PullPathAccessRoles(PullPathAccessRolesRequest) returns (PullPathAccessRolesResponse) {}
+
+    rpc PushPathInfo(PushPathInfoRequest) returns (PushPathInfoResponse) {}
+    rpc PullPathInfo(PullPathInfoRequest) returns (PullPathInfoResponse) {}
 }

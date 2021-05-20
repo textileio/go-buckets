@@ -7,7 +7,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 )
 
-var log = logging.Logger("buckets-dns")
+var log = logging.Logger("buckets/dns")
 
 const IPFSGateway = "cloudflare-ipfs.com"
 
@@ -94,7 +94,7 @@ func (m *Manager) UpdateRecord(id, rtype, name, content string) error {
 	return nil
 }
 
-// Delete removes a record by ID from dns.
+// DeleteRecord removes a record by ID from dns.
 func (m *Manager) DeleteRecord(id string) error {
 	if err := m.api.DeleteDNSRecord(m.zoneID, id); err != nil {
 		return err

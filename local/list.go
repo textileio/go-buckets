@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
@@ -29,7 +30,7 @@ func (b *Bucket) ListRemotePath(ctx context.Context, pth string) (items []Bucket
 	if pth == "." || pth == "/" || pth == "./" {
 		pth = ""
 	}
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}

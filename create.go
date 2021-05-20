@@ -14,6 +14,8 @@ import (
 	"github.com/textileio/go-threads/db"
 )
 
+// Create a new bucket using identity.
+// See CreateOption for more details.
 func (b *Buckets) Create(
 	ctx context.Context,
 	identity did.Token,
@@ -30,7 +32,12 @@ func (b *Buckets) Create(
 		}
 	} else {
 		args.Thread = core.NewRandomIDV1()
-		if err := b.db.NewDB(ctx, args.Thread, db.WithNewManagedName(args.Name)); err != nil {
+		if err := b.db.NewDB(
+			ctx,
+			args.Thread,
+			db.WithNewManagedName(args.Name),
+			db.WithNewManagedToken(identity),
+		); err != nil {
 			return nil, nil, 0, fmt.Errorf("creating new thread: %v", err)
 		}
 	}

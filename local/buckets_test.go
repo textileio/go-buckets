@@ -10,11 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/crypto"
-
 	ipfsfiles "github.com/ipfs/go-ipfs-files"
 	httpapi "github.com/ipfs/go-ipfs-http-client"
 	"github.com/ipfs/interface-go-ipfs-core/path"
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,8 +21,8 @@ import (
 	"github.com/textileio/go-buckets/api/client"
 	"github.com/textileio/go-buckets/api/common"
 	. "github.com/textileio/go-buckets/local"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/thread"
+	tutil "github.com/textileio/go-threads/util"
 )
 
 func TestMain(m *testing.M) {
@@ -308,9 +307,9 @@ func createIpfsFolder(t *testing.T) (pth path.Resolved) {
 	pth, err = ipfs.Unixfs().Add(
 		context.Background(),
 		ipfsfiles.NewMapDirectory(map[string]ipfsfiles.Node{
-			"file1.txt": ipfsfiles.NewBytesFile(util.GenerateRandomBytes(1024)),
+			"file1.txt": ipfsfiles.NewBytesFile(tutil.GenerateRandomBytes(1024)),
 			"folder1": ipfsfiles.NewMapDirectory(map[string]ipfsfiles.Node{
-				"file2.txt": ipfsfiles.NewBytesFile(util.GenerateRandomBytes(512)),
+				"file2.txt": ipfsfiles.NewBytesFile(tutil.GenerateRandomBytes(512)),
 			}),
 		}),
 	)

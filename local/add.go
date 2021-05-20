@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/interface-go-ipfs-core/path"
@@ -18,7 +19,7 @@ import (
 func (b *Bucket) AddRemoteCid(ctx context.Context, c cid.Cid, dest string, opts ...AddOption) error {
 	b.Lock()
 	defer b.Unlock()
-	ctx, err := b.authCtx(ctx)
+	ctx, err := b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return err
 	}

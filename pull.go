@@ -9,7 +9,6 @@ import (
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/dcrypto"
 	"github.com/textileio/go-buckets/dag"
-	"github.com/textileio/go-buckets/util"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
@@ -33,14 +32,19 @@ func (r *pathReader) Close() error {
 	return nil
 }
 
+// PullPath returns a reader to a bucket path.
 func (b *Buckets) PullPath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (io.ReadCloser, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	pth = trimSlash(pth)
-	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, pth, identity)
+	instance, bpth, err := b.getBucketAndPath(ctx, thread, key, identity, pth)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +55,7 @@ func (b *Buckets) PullPath(
 
 	var filePath path.Resolved
 	if instance.IsPrivate() {
-		buckPath, err := util.NewResolvedPath(instance.Path)
+		buckPath, err := dag.NewResolvedPath(instance.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -102,6 +106,7 @@ func (b *Buckets) PullPath(
 	return r, nil
 }
 
+// PullIPFSPath returns a reader to an IPFS path.
 func (b *Buckets) PullIPFSPath(ctx context.Context, pth string) (io.ReadCloser, error) {
 	node, err := b.ipfs.Unixfs().Get(ctx, path.New(pth))
 	if err != nil {

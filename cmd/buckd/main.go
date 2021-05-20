@@ -7,11 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	ds "github.com/ipfs/go-datastore"
-	badger "github.com/ipfs/go-ds-badger"
 	httpapi "github.com/ipfs/go-ipfs-http-client"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
@@ -22,9 +21,12 @@ import (
 	dns "github.com/textileio/go-buckets/dns"
 	"github.com/textileio/go-buckets/gateway"
 	ipns "github.com/textileio/go-buckets/ipns"
+	"github.com/textileio/go-buckets/pinning"
+	badger "github.com/textileio/go-ds-badger3"
 	mongods "github.com/textileio/go-ds-mongo"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
+	kt "github.com/textileio/go-threads/db/keytransform"
 	nc "github.com/textileio/go-threads/net/api/client"
 	"github.com/textileio/go-threads/util"
 	"google.golang.org/grpc"
@@ -100,6 +102,10 @@ var (
 			"threadsAddr": {
 				Key:      "threads.addr",
 				DefValue: "127.0.0.1:4000",
+			},
+			"threadsGatewayUrl": {
+				Key:      "threads.gateway_url",
+				DefValue: "http://127.0.0.1:7000",
 			},
 
 			// IPFS
@@ -204,6 +210,10 @@ func init() {
 		"threadsAddr",
 		config.Flags["threadsAddr"].DefValue.(string),
 		"Threads API address")
+	rootCmd.PersistentFlags().String(
+		"threadsGatewayUrl",
+		config.Flags["threadsGatewayUrl"].DefValue.(string),
+		"Threads Gateway URL")
 
 	// IPFS
 	rootCmd.PersistentFlags().String(
@@ -249,12 +259,14 @@ var rootCmd = &cobra.Command{
 
 		if config.Viper.GetBool("log.debug") {
 			err := util.SetLogLevels(map[string]logging.LogLevel{
-				daemonName:        logging.LevelDebug,
-				"buckets":         logging.LevelDebug,
-				"buckets-api":     logging.LevelDebug,
-				"buckets-gateway": logging.LevelDebug,
-				"buckets-ipns":    logging.LevelDebug,
-				"buckets-dns":     logging.LevelDebug,
+				daemonName:         logging.LevelDebug,
+				"buckets":          logging.LevelDebug,
+				"buckets/api":      logging.LevelDebug,
+				"buckets/ipns":     logging.LevelDebug,
+				"buckets/dns":      logging.LevelDebug,
+				"buckets/ps":       logging.LevelDebug,
+				"buckets/ps-queue": logging.LevelDebug,
+				"buckets/gateway":  logging.LevelDebug,
 			})
 			cmd.ErrCheck(err)
 		}
@@ -284,6 +296,8 @@ var rootCmd = &cobra.Command{
 		gatewayWwwDomain := config.Viper.GetString("gateway.www_domain")
 
 		threadsApi := config.Viper.GetString("threads.addr")
+		threadsGatewayUrl := config.Viper.GetString("threads.gateway_url")
+
 		ipfsApi := cmd.AddrFromStr(config.Viper.GetString("ipfs.multiaddr"))
 
 		//ipnsRepublishSchedule := config.Viper.GetString("ipns.republish_schedule")
@@ -299,15 +313,19 @@ var rootCmd = &cobra.Command{
 		ipfs, err := httpapi.NewApi(ipfsApi)
 		cmd.ErrCheck(err)
 
-		var ipnsms ds.TxnDatastore
+		var ipnsms, pss kt.TxnDatastoreExtended
 		switch datastoreType {
 		case "badger":
-			ipnsms, err = newBadgerStore(datastoreBadgerRepo)
+			ipnsms, err = newBadgerStore(filepath.Join(datastoreBadgerRepo, "ipns"))
+			cmd.ErrCheck(err)
+			pss, err = newBadgerStore(filepath.Join(datastoreBadgerRepo, "pinq"))
 			cmd.ErrCheck(err)
 		case "mongo":
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			ipnsms, err = newMongoStore(ctx, datastoreMongoUri, datastoreMongoName, "ipns")
+			cmd.ErrCheck(err)
+			pss, err = newMongoStore(ctx, datastoreMongoUri, datastoreMongoName, "pinq")
 			cmd.ErrCheck(err)
 		default:
 			cmd.Fatal(errors.New("datastoreType must be 'badger' or 'mongo'"))
@@ -327,27 +345,36 @@ var rootCmd = &cobra.Command{
 		cmd.ErrCheck(err)
 
 		buckets.GatewayURL = gatewayUrl
+		buckets.ThreadsGatewayURL = threadsGatewayUrl
 		buckets.WWWDomain = gatewayWwwDomain
 
 		server, proxy, err := common.GetServerAndProxy(lib, addrApi, addrApiProxy)
 		cmd.ErrCheck(err)
 
 		// Configure gateway
-		gateway, err := gateway.NewGateway(lib, ipfs, ipnsm, gateway.Config{
+		ps, err := pinning.NewService(lib, pss)
+		cmd.ErrCheck(err)
+		gw, err := gateway.NewGateway(lib, ipfs, ipnsm, ps, gateway.Config{
 			Addr:       addrGateway,
 			URL:        gatewayUrl,
 			Domain:     gatewayWwwDomain,
 			Subdomains: gatewaySubdomains,
 		})
 		cmd.ErrCheck(err)
-		gateway.Start()
+		gw.Start()
 
 		fmt.Println("Welcome to Buckets!")
 
 		cmd.HandleInterrupt(func() {
-			err := gateway.Close()
+			err := gw.Close()
 			cmd.LogErr(err)
 			log.Info("gateway was shutdown")
+
+			err = ps.Close()
+			cmd.LogErr(err)
+			err = pss.Close()
+			cmd.LogErr(err)
+			log.Info("pinning service was shutdown")
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
@@ -375,7 +402,13 @@ var rootCmd = &cobra.Command{
 
 			err = ipnsm.Close()
 			cmd.LogErr(err)
+			err = ipnsms.Close()
+			cmd.LogErr(err)
 			log.Info("ipns manager was shutdown")
+
+			err = db.Close()
+			cmd.LogErr(err)
+			log.Info("db client was shutdown")
 
 			err = net.Close()
 			cmd.LogErr(err)
@@ -397,13 +430,13 @@ func getClientRPCOpts(target string) (opts []grpc.DialOption) {
 	return opts
 }
 
-func newBadgerStore(repo string) (ds.TxnDatastore, error) {
+func newBadgerStore(repo string) (kt.TxnDatastoreExtended, error) {
 	if err := os.MkdirAll(repo, os.ModePerm); err != nil {
 		return nil, err
 	}
 	return badger.NewDatastore(repo, &badger.DefaultOptions)
 }
 
-func newMongoStore(ctx context.Context, uri, db, collection string) (ds.TxnDatastore, error) {
+func newMongoStore(ctx context.Context, uri, db, collection string) (kt.TxnDatastoreExtended, error) {
 	return mongods.New(ctx, uri, db, mongods.WithCollName(collection))
 }

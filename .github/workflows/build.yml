@@ -24,11 +24,8 @@ jobs:
   buck:
     name: Buck CLI
     runs-on: ubuntu-latest
+    container: golang:1.16.0-buster
     steps:
-      - name: setup
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.16
       - name: checkout
         uses: actions/checkout@v1
       - name: build
@@ -36,11 +33,8 @@ jobs:
   buckd:
     name: Buck Daemon
     runs-on: ubuntu-latest
+    container: golang:1.16.0-buster
     steps:
-      - name: setup
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.16
       - name: checkout
         uses: actions/checkout@v1
       - name: build

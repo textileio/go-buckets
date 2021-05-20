@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -25,7 +26,7 @@ var MaxPullConcurrency = 10
 func (b *Bucket) PullRemote(ctx context.Context, opts ...PathOption) (roots Roots, err error) {
 	b.Lock()
 	defer b.Unlock()
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}

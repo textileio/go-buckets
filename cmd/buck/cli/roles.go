@@ -40,7 +40,7 @@ Access roles:
 		cmd.ErrCheck(err)
 		conf, err := bucks.NewConfigFromCmd(c, ".")
 		cmd.ErrCheck(err)
-		ctx, cancel := context.WithTimeout(context.Background(), cmd.PullTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), cmd.Timeout)
 		defer cancel()
 		buck, err := bucks.GetLocalBucket(ctx, conf)
 		cmd.ErrCheck(err)
@@ -97,7 +97,7 @@ var rolesLsCmd = &cobra.Command{
 	Run: func(c *cobra.Command, args []string) {
 		conf, err := bucks.NewConfigFromCmd(c, ".")
 		cmd.ErrCheck(err)
-		ctx, cancel := context.WithTimeout(context.Background(), cmd.PullTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), cmd.Timeout)
 		defer cancel()
 		buck, err := bucks.GetLocalBucket(ctx, conf)
 		cmd.ErrCheck(err)

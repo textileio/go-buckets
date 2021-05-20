@@ -19,7 +19,6 @@ import (
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api/common"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-buckets/util"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
 	tdb "github.com/textileio/go-threads/db"
@@ -30,9 +29,9 @@ import (
 func NewService(t *testing.T) (listenAddr string, host did.DID) {
 	err := tutil.SetLogLevels(map[string]logging.LogLevel{
 		"buckets":      logging.LevelDebug,
-		"buckets-api":  logging.LevelDebug,
-		"buckets-ipns": logging.LevelDebug,
-		"buckets-dns":  logging.LevelDebug,
+		"buckets/api":  logging.LevelDebug,
+		"buckets/ipns": logging.LevelDebug,
+		"buckets/dns":  logging.LevelDebug,
 	})
 	require.NoError(t, err)
 
@@ -40,7 +39,7 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 	net, err := nc.NewClient(threadsAddr, common.GetClientRPCOpts(threadsAddr)...)
 	require.NoError(t, err)
 
-	// @todo: Fix me
+	// @todo: Use service description to build client
 	doc, err := net.GetServices(context.Background())
 	require.NoError(t, err)
 
@@ -48,7 +47,8 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 	require.NoError(t, err)
 	ipfs, err := httpapi.NewApi(GetIPFSApiMultiAddr())
 	require.NoError(t, err)
-	ipnsm, err := ipns.NewManager(tdb.NewTxMapDatastore(), ipfs)
+	ipnsms := tdb.NewTxMapDatastore()
+	ipnsm, err := ipns.NewManager(ipnsms, ipfs)
 	require.NoError(t, err)
 	lib, err := buckets.NewBuckets(net, db, ipfs, ipnsm, nil)
 	require.NoError(t, err)
@@ -64,6 +64,8 @@ func NewService(t *testing.T) (listenAddr string, host did.DID) {
 		server.Stop()
 		require.NoError(t, lib.Close())
 		require.NoError(t, ipnsm.Close())
+		require.NoError(t, ipnsms.Close())
+		require.NoError(t, db.Close())
 		require.NoError(t, net.Close())
 	})
 
@@ -83,9 +85,9 @@ func GetThreadsApiAddr() string {
 func GetIPFSApiMultiAddr() ma.Multiaddr {
 	env := os.Getenv("IPFS_API_MULTIADDR")
 	if env != "" {
-		return util.MustParseAddr(env)
+		return tutil.MustParseAddr(env)
 	}
-	return util.MustParseAddr("/ip4/127.0.0.1/tcp/5012")
+	return tutil.MustParseAddr("/ip4/127.0.0.1/tcp/5012")
 }
 
 // StartServices starts an ipfs and threads node for tests.

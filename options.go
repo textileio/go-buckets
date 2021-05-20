@@ -6,6 +6,7 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// CreateOptions are used when creating a new bucket.
 type CreateOptions struct {
 	Thread  core.ID
 	Name    string
@@ -44,6 +45,7 @@ func WithCid(cid c.Cid) CreateOption {
 	}
 }
 
+// Options are used to perform bucket operations.
 type Options struct {
 	Root     path.Resolved
 	Progress chan<- int64

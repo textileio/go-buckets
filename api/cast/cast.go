@@ -1,6 +1,8 @@
 package cast
 
 import (
+	"encoding/json"
+
 	"github.com/textileio/go-buckets"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
 	"github.com/textileio/go-buckets/collection"
@@ -57,18 +59,28 @@ func BucketFromPb(bucket *pb.Bucket) (buckets.Bucket, error) {
 }
 
 func MetadataToPb(md collection.Metadata) *pb.Metadata {
+	var info []byte
+	if md.Info != nil {
+		info, _ = json.Marshal(md.Info)
+	}
 	return &pb.Metadata{
 		Key:       md.Key,
 		Roles:     RolesToPb(md.Roles),
 		UpdatedAt: md.UpdatedAt,
+		Info:      info,
 	}
 }
 
 func MetadataFromPb(md *pb.Metadata) collection.Metadata {
+	var info map[string]interface{}
+	if md.Info != nil {
+		_ = json.Unmarshal(md.Info, &info)
+	}
 	return collection.Metadata{
 		Key:       md.Key,
 		Roles:     RolesFromPb(md.Roles),
 		UpdatedAt: md.UpdatedAt,
+		Info:      info,
 	}
 }
 
@@ -127,11 +139,24 @@ func RolesFromPb(roles map[string]pb.PathAccessRole) map[did.DID]collection.Role
 	return croles
 }
 
+func InfoToPb(info map[string]interface{}) ([]byte, error) {
+	return json.Marshal(info)
+}
+
+func InfoFromPb(info []byte) (map[string]interface{}, error) {
+	var pinfo map[string]interface{}
+	if err := json.Unmarshal(info, &pinfo); err != nil {
+		return nil, err
+	}
+	return pinfo, nil
+}
+
 func LinksToPb(links buckets.Links) *pb.Links {
 	return &pb.Links{
 		Url:  links.URL,
 		Www:  links.WWW,
 		Ipns: links.IPNS,
+		Bps:  links.BPS,
 	}
 }
 
@@ -140,5 +165,6 @@ func LinksFromPb(links *pb.Links) buckets.Links {
 		URL:  links.Url,
 		WWW:  links.Www,
 		IPNS: links.Ipns,
+		BPS:  links.Bps,
 	}
 }

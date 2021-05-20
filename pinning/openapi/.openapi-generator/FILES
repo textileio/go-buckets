@@ -1,0 +1,14 @@
+.openapi-generator-ignore
+Dockerfile
+api/openapi.yaml
+go/README.md
+go/api_pins.go
+go/model_failure.go
+go/model_failure_error.go
+go/model_pin.go
+go/model_pin_results.go
+go/model_pin_status.go
+go/model_status.go
+go/model_text_matching_strategy.go
+go/routers.go
+main.go

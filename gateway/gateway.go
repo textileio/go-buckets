@@ -1,12 +1,18 @@
 package gateway
 
+// @todo: Migrate away from the current asset generator
+
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,10 +29,12 @@ import (
 	gincors "github.com/rs/cors/wrapper/gin"
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-threads/core/thread"
+	"github.com/textileio/go-buckets/pinning"
+	"github.com/textileio/go-threads/core/did"
+	core "github.com/textileio/go-threads/core/thread"
 )
 
-var log = logging.Logger("buckets-gateway")
+var log = logging.Logger("buckets/gateway")
 
 const handlerTimeout = time.Minute
 
@@ -48,6 +56,7 @@ type Gateway struct {
 	lib    *buckets.Buckets
 	ipfs   iface.CoreAPI
 	ipns   *ipns.Manager
+	ps     *pinning.Service
 
 	addr       string
 	url        string
@@ -64,11 +73,18 @@ type Config struct {
 }
 
 // NewGateway returns a new gateway.
-func NewGateway(lib *buckets.Buckets, ipfs iface.CoreAPI, ipns *ipns.Manager, conf Config) (*Gateway, error) {
+func NewGateway(
+	lib *buckets.Buckets,
+	ipfs iface.CoreAPI,
+	ipns *ipns.Manager,
+	ps *pinning.Service,
+	conf Config,
+) (*Gateway, error) {
 	return &Gateway{
 		lib:        lib,
 		ipfs:       ipfs,
 		ipns:       ipns,
+		ps:         ps,
 		addr:       conf.Addr,
 		url:        conf.URL,
 		domain:     conf.Domain,
@@ -99,17 +115,38 @@ func (g *Gateway) Start() {
 		c.Writer.WriteHeader(http.StatusNoContent)
 	})
 
-	router.GET("/thread/:thread/:collection", g.subdomainOptionHandler, g.collectionHandler)
-	router.GET("/thread/:thread/:collection/:id", g.subdomainOptionHandler, g.instanceHandler)
-	router.GET("/thread/:thread/:collection/:id/*path", g.subdomainOptionHandler, g.instanceHandler)
-
+	// IPFS
 	router.GET("/ipfs/:root", g.subdomainOptionHandler, g.ipfsHandler)
 	router.GET("/ipfs/:root/*path", g.subdomainOptionHandler, g.ipfsHandler)
+
+	// IPNS
 	router.GET("/ipns/:key", g.subdomainOptionHandler, g.ipnsHandler)
 	router.GET("/ipns/:key/*path", g.subdomainOptionHandler, g.ipnsHandler)
+
+	// P2P
 	router.GET("/p2p/:key", g.subdomainOptionHandler, g.p2pHandler)
+
+	// IPLD
 	router.GET("/ipld/:root", g.subdomainOptionHandler, g.ipldHandler)
 	router.GET("/ipld/:root/*path", g.subdomainOptionHandler, g.ipldHandler)
+
+	// Buckets
+	router.GET("/thread/:thread/buckets", g.subdomainOptionHandler, g.threadHandler)
+	router.POST("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.bucketPushPathsHandler)
+	router.GET("/thread/:thread/buckets/:key", g.subdomainOptionHandler, g.bucketHandler)
+	router.GET("/thread/:thread/buckets/:key/*path", g.subdomainOptionHandler, g.bucketHandler)
+
+	// Buckets shorthand
+	router.POST("/b/:key", g.bucketPushPathsHandler)
+	router.GET("/b/:key", g.bucketHandler)
+	router.GET("/b/:key/*path", g.bucketHandler)
+
+	// Buckets Pinning Service
+	router.GET("/bps/:key/pins", g.subdomainOptionHandler, g.listPinsHandler)
+	router.POST("/bps/:key/pins", g.subdomainOptionHandler, g.addPinHandler)
+	router.GET("/bps/:key/pins/:requestid", g.subdomainOptionHandler, g.getPinHandler)
+	router.POST("/bps/:key/pins/:requestid", g.subdomainOptionHandler, g.replacePinHandler)
+	router.DELETE("/bps/:key/pins/:requestid", g.subdomainOptionHandler, g.removePinHandler)
 
 	router.NoRoute(g.subdomainHandler)
 
@@ -125,58 +162,33 @@ func (g *Gateway) Start() {
 	log.Infof("gateway listening at %s", g.server.Addr)
 }
 
-// loadTemplate loads HTML templates.
-func loadTemplate() (*template.Template, error) {
-	t := template.New("")
-	for name, file := range Assets.Files {
-		if file.IsDir() || !strings.HasSuffix(name, ".gohtml") {
-			continue
-		}
-		h, err := ioutil.ReadAll(file)
-		if err != nil {
-			return nil, err
-		}
-		t, err = t.New(name).Parse(string(h))
-		if err != nil {
-			return nil, err
-		}
-	}
-	return t, nil
-}
-
-// Addr returns the gateway's address.
-func (g *Gateway) Addr() string {
-	return g.server.Addr
-}
-
 // Close the gateway.
 func (g *Gateway) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := g.server.Shutdown(ctx); err != nil {
-		return err
+		return fmt.Errorf("shutting down server: %v", err)
 	}
 	return nil
 }
 
-// subdomainOptionHandler redirects valid namespaces to subdomains if the option is enabled.
-func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
-	if !g.subdomains {
-		return
-	}
-	loc, ok := g.toSubdomainURL(c.Request)
-	if !ok {
-		render404(c)
-		return
-	}
+// Addr returns the gateway's listen address.
+func (g *Gateway) Addr() string {
+	return g.server.Addr
+}
 
-	// See security note https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L105
-	c.Request.Header.Set("Clear-Site-Data", "\"cookies\", \"storage\"")
+// Url returns the gateway's externally configured URL.
+func (g *Gateway) Url() string {
+	return g.url
+}
 
-	c.Redirect(http.StatusPermanentRedirect, loc)
+// Buckets returns the gateway's bucket lib.
+func (g *Gateway) Buckets() *buckets.Buckets {
+	return g.lib
 }
 
 // dashboardHandler renders a dev or org dashboard.
+// @todo: Use or remove dashboard handler
 func (g *Gateway) dashboardHandler(c *gin.Context) {
 	render404(c)
 }
@@ -199,6 +211,51 @@ func formatError(err error) string {
 	words := strings.SplitN(err.Error(), " ", 2)
 	words[0] = strings.Title(words[0])
 	return strings.Join(words, " ") + "."
+}
+
+// getThread returns core.ID from request params or the IPNS key store.
+func (g *Gateway) getThread(c *gin.Context) (core.ID, error) {
+	threadp := c.Param("thread")
+	if len(threadp) != 0 {
+		thread, err := core.Decode(threadp)
+		if err != nil {
+			return "", errors.New("invalid thread ID")
+		}
+		return thread, nil
+	}
+	// @todo: Use a fixed length in-mem cache of thread IDs
+	ipnskey, err := g.ipns.Store().GetByCid(c.Param("key"))
+	if err != nil {
+		return "", fmt.Errorf("looking up thread: %v", err)
+	}
+	return ipnskey.ThreadID, nil
+}
+
+// getAuth returns did.Token from the authorization header.
+func getAuth(c *gin.Context) (did.Token, bool) {
+	auth := strings.Split(c.Request.Header.Get("Authorization"), " ")
+	if len(auth) < 2 {
+		return "", false
+	}
+	return did.Token(auth[1]), true
+}
+
+// subdomainOptionHandler redirects valid namespaces to subdomains if the option is enabled.
+func (g *Gateway) subdomainOptionHandler(c *gin.Context) {
+	if !g.subdomains {
+		return
+	}
+	loc, ok := g.toSubdomainURL(c.Request)
+	if !ok {
+		render404(c)
+		return
+	}
+
+	// See security note:
+	// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L105
+	c.Request.Header.Set("Clear-Site-Data", "\"cookies\", \"storage\"")
+
+	c.Redirect(http.StatusPermanentRedirect, loc)
 }
 
 // subdomainHandler handles requests by parsing the request subdomain.
@@ -233,26 +290,51 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 	case "ipld":
 		g.renderIPLDPath(c, key+c.Request.URL.Path)
 	case "thread":
-		threadID, err := thread.Decode(key)
+		thread, err := core.Decode(key)
 		if err != nil {
-			renderError(c, http.StatusBadRequest, fmt.Errorf("invalid thread ID"))
+			renderError(c, http.StatusBadRequest, errors.New("invalid thread ID"))
 			return
 		}
 		parts := strings.SplitN(strings.TrimSuffix(c.Request.URL.Path, "/"), "/", 4)
-		switch len(parts) {
-		case 1:
-			// @todo: Render something at the thread root
+		if len(parts) < 2 || parts[1] != "buckets" {
 			render404(c)
+			return
+		}
+		switch len(parts) {
 		case 2:
-			if parts[1] != "" {
-				g.renderCollection(c, threadID, parts[1])
+			g.renderThread(c, thread)
+		case 3:
+			if c.Request.Method == "POST" {
+				g.pushBucketPaths(c, thread, parts[2])
 			} else {
-				render404(c)
+				g.renderBucket(c, thread, parts[2], "")
+			}
+		case 4:
+			g.renderBucket(c, thread, parts[2], parts[3])
+		default:
+			render404(c)
+		}
+	case "bps":
+		parts := strings.SplitN(strings.TrimSuffix(c.Request.URL.Path, "/"), "/", 3)
+		if len(parts) < 2 || parts[1] != "pins" {
+			render404(c)
+			return
+		}
+		switch len(parts) {
+		case 2:
+			if c.Request.Method == "POST" {
+				g.addPin(c, key)
+			} else {
+				g.listPins(c, key)
 			}
 		case 3:
-			g.renderInstance(c, threadID, parts[1], parts[2], "")
-		case 4:
-			g.renderInstance(c, threadID, parts[1], parts[2], parts[3])
+			if c.Request.Method == "POST" {
+				g.replacePin(c, key, parts[2])
+			} else if c.Request.Method == "DELETE" {
+				g.removePin(c, key, parts[2])
+			} else {
+				g.getPin(c, key, parts[2])
+			}
 		default:
 			render404(c)
 		}
@@ -261,17 +343,19 @@ func (g *Gateway) subdomainHandler(c *gin.Context) {
 	}
 }
 
-// Modified from https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L251
+// Modified from:
+// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L251
 func isSubdomainNamespace(ns string) bool {
 	switch ns {
-	case "ipfs", "ipns", "p2p", "ipld", "thread":
+	case "ipfs", "ipns", "p2p", "ipld", "thread", "bps":
 		return true
 	default:
 		return false
 	}
 }
 
-// Copied from https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L260
+// Copied from:
+// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L260
 func isPeerIDNamespace(ns string) bool {
 	switch ns {
 	case "ipns", "p2p":
@@ -282,7 +366,8 @@ func isPeerIDNamespace(ns string) bool {
 }
 
 // Converts a hostname/path to a subdomain-based URL, if applicable.
-// Modified from https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L270
+// Modified from:
+// https://github.com/ipfs/go-ipfs/blob/dbfa7bf2b216bad9bec1ff66b1f3814f4faac31e/core/corehttp/hostname.go#L270
 func (g *Gateway) toSubdomainURL(r *http.Request) (redirURL string, ok bool) {
 	var ns, rootID, rest string
 
@@ -356,4 +441,61 @@ func (g *Gateway) toSubdomainURL(r *http.Request) (redirURL string, ok bool) {
 	scheme := urlparts[0]
 	host := urlparts[1]
 	return safeRedirectURL(fmt.Sprintf("%s://%s.%s.%s/%s%s", scheme, rootID, ns, host, rest, query))
+}
+
+// detectReaderOrPathContentType detects the best available mime type for a reader,
+// considering file extensions. http.DetectContentType does not properly detect content-type
+// for web assets: htm, html, css, and js.
+func detectReaderOrPathContentType(r io.Reader, pth string) (string, io.Reader, error) {
+	var buf [512]byte
+	n, err := io.ReadAtLeast(r, buf[:], len(buf))
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return "", nil, fmt.Errorf("reading reader: %s", err)
+	}
+	reader := io.MultiReader(bytes.NewReader(buf[:n]), r)
+	switch filepath.Ext(pth) {
+	case ".htm", ".html":
+		return "text/html", reader, nil
+	case ".css":
+		return "text/css", reader, nil
+	case ".js":
+		return "application/javascript", reader, nil
+	case ".txt", ".md":
+		return "text/plain", reader, nil
+	default:
+		return http.DetectContentType(buf[:]), reader, nil
+	}
+}
+
+// byteCountDecimal returns a human readable byte size.
+func byteCountDecimal(b int64) string {
+	const unit = 1000
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "kMGTPE"[exp])
+}
+
+// loadTemplate loads HTML templates.
+func loadTemplate() (*template.Template, error) {
+	t := template.New("")
+	for name, file := range Assets.Files {
+		if file.IsDir() || !strings.HasSuffix(name, ".gohtml") {
+			continue
+		}
+		h, err := ioutil.ReadAll(file)
+		if err != nil {
+			return nil, err
+		}
+		t, err = t.New(name).Parse(string(h))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return t, nil
 }

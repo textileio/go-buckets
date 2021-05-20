@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"time"
 
 	"github.com/textileio/go-buckets/collection"
 	"github.com/textileio/go-threads/core/did"
@@ -17,7 +18,7 @@ func (b *Bucket) PushPathAccessRoles(
 	pth string,
 	roles map[did.DID]collection.Role,
 ) (merged map[did.DID]collection.Role, err error) {
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}
@@ -33,7 +34,7 @@ func (b *Bucket) PushPathAccessRoles(
 
 // PullPathAccessRoles returns access roles for a path.
 func (b *Bucket) PullPathAccessRoles(ctx context.Context, pth string) (roles map[did.DID]collection.Role, err error) {
-	ctx, err = b.authCtx(ctx)
+	ctx, err = b.authCtx(ctx, time.Hour)
 	if err != nil {
 		return
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/textileio/go-buckets"
 	"github.com/textileio/go-buckets/api/cast"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 )
@@ -57,7 +57,7 @@ func (s *Service) Create(ctx context.Context, req *pb.CreateRequest) (*pb.Create
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.lib.GetLinksForBucket(ctx, bucket, "", identity)
+	links, err := s.lib.GetLinksForBucket(ctx, bucket, identity, "")
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (s *Service) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse,
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.lib.GetLinksForBucket(ctx, bucket, "", identity)
+	links, err := s.lib.GetLinksForBucket(ctx, bucket, identity, "")
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) GetLinks(ctx context.Context, req *pb.GetLinksRequest) (*pb.Ge
 		return nil, err
 	}
 
-	links, err := s.lib.GetLinks(ctx, thread, req.Key, req.Path, identity)
+	links, err := s.lib.GetLinks(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +147,11 @@ func (s *Service) ListPath(ctx context.Context, req *pb.ListPathRequest) (*pb.Li
 		return nil, err
 	}
 
-	item, bucket, err := s.lib.ListPath(ctx, thread, req.Key, req.Path, identity)
+	item, bucket, err := s.lib.ListPath(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.lib.GetLinksForBucket(ctx, bucket, req.Path, identity)
+	links, err := s.lib.GetLinksForBucket(ctx, bucket, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -194,26 +194,24 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 			return fmt.Errorf("decoding thread: %v", err)
 		}
 		key = payload.Header.Key
-		if len(payload.Header.Root) != 0 {
-			root, err = util.NewResolvedPath(payload.Header.Root)
-			if err != nil {
-				return fmt.Errorf("resolving root path: %v", err)
-			}
+		root, err = rootFromString(payload.Header.Root)
+		if err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("push bucket path header is required")
 	}
 
-	in, out, errs := s.lib.PushPaths(server.Context(), thread, key, root, identity)
+	in, out, errs := s.lib.PushPaths(server.Context(), thread, key, identity, root)
 	if len(errs) != 0 {
 		return <-errs
 	}
 	errCh := make(chan error)
 	go func() {
+		defer close(in)
 		for {
 			req, err := server.Recv()
 			if err == io.EOF {
-				close(in)
 				return
 			} else if err != nil {
 				errCh <- fmt.Errorf("on receive: %v", err)
@@ -221,9 +219,9 @@ func (s *Service) PushPaths(server pb.APIService_PushPathsServer) error {
 			}
 			switch payload := req.Payload.(type) {
 			case *pb.PushPathsRequest_Chunk_:
-				in <- buckets.PushPathsChunk{
-					Path: payload.Chunk.Path,
-					Data: payload.Chunk.Data,
+				in <- buckets.PushPathsInput{
+					Path:  payload.Chunk.Path,
+					Chunk: payload.Chunk.Data,
 				}
 			default:
 				errCh <- fmt.Errorf("invalid request")
@@ -258,7 +256,7 @@ func (s *Service) PullPath(req *pb.PullPathRequest, server pb.APIService_PullPat
 		return err
 	}
 
-	reader, err := s.lib.PullPath(server.Context(), thread, req.Key, req.Path, identity)
+	reader, err := s.lib.PullPath(server.Context(), thread, req.Key, identity, req.Path)
 	if err != nil {
 		return err
 	}
@@ -312,12 +310,16 @@ func (s *Service) SetPath(ctx context.Context, req *pb.SetPathRequest) (*pb.SetP
 	if err != nil {
 		return nil, err
 	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
 	cid, err := c.Decode(req.Cid)
 	if err != nil {
 		return nil, fmt.Errorf("decoding cid: %v", err)
 	}
 
-	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, req.Path, cid, identity)
+	pinned, bucket, err := s.lib.SetPath(ctx, thread, req.Key, identity, root, req.Path, cid, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +335,12 @@ func (s *Service) MovePath(ctx context.Context, req *pb.MovePathRequest) (res *p
 	if err != nil {
 		return nil, err
 	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
 
-	pinned, bucket, err := s.lib.MovePath(ctx, thread, req.Key, req.FromPath, req.ToPath, identity)
+	pinned, bucket, err := s.lib.MovePath(ctx, thread, req.Key, identity, root, req.FromPath, req.ToPath)
 	if err != nil {
 		return nil, err
 	}
@@ -349,15 +355,12 @@ func (s *Service) RemovePath(ctx context.Context, req *pb.RemovePathRequest) (re
 	if err != nil {
 		return nil, err
 	}
-	var root path.Resolved
-	if len(req.Root) != 0 {
-		root, err = util.NewResolvedPath(req.Root)
-		if err != nil {
-			return nil, fmt.Errorf("resolving root path: %v", err)
-		}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
 	}
 
-	pinned, bucket, err := s.lib.RemovePath(ctx, thread, req.Key, req.Path, root, identity)
+	pinned, bucket, err := s.lib.RemovePath(ctx, thread, req.Key, identity, root, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -375,9 +378,13 @@ func (s *Service) PushPathAccessRoles(
 	if err != nil {
 		return nil, err
 	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
 	roles := cast.RolesFromPb(req.Roles)
 
-	pinned, bucket, err := s.lib.PushPathAccessRoles(ctx, thread, req.Key, req.Path, roles, identity)
+	pinned, bucket, err := s.lib.PushPathAccessRoles(ctx, thread, req.Key, identity, root, req.Path, roles)
 	if err != nil {
 		return nil, err
 	}
@@ -396,12 +403,61 @@ func (s *Service) PullPathAccessRoles(
 		return nil, err
 	}
 
-	roles, err := s.lib.PullPathAccessRoles(ctx, thread, req.Key, req.Path, identity)
+	roles, err := s.lib.PullPathAccessRoles(ctx, thread, req.Key, identity, req.Path)
 	if err != nil {
 		return nil, err
 	}
 	return &pb.PullPathAccessRolesResponse{
 		Roles: cast.RolesToPb(roles),
+	}, nil
+}
+
+func (s *Service) PushPathInfo(
+	ctx context.Context,
+	req *pb.PushPathInfoRequest,
+) (res *pb.PushPathInfoResponse, err error) {
+	thread, identity, err := getThreadAndIdentity(ctx, req.Thread)
+	if err != nil {
+		return nil, err
+	}
+	root, err := rootFromString(req.Root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := cast.InfoFromPb(req.Info)
+	if err != nil {
+		return nil, err
+	}
+
+	bucket, err := s.lib.PushPathInfo(ctx, thread, req.Key, identity, root, req.Path, info)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PushPathInfoResponse{
+		Bucket: cast.BucketToPb(bucket),
+	}, nil
+}
+
+func (s *Service) PullPathInfo(
+	ctx context.Context,
+	req *pb.PullPathInfoRequest,
+) (*pb.PullPathInfoResponse, error) {
+	thread, identity, err := getThreadAndIdentity(ctx, req.Thread)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := s.lib.PullPathInfo(ctx, thread, req.Key, identity, req.Path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := cast.InfoToPb(info)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.PullPathInfoResponse{
+		Info: data,
 	}, nil
 }
 
@@ -417,4 +473,14 @@ func getThreadAndIdentity(ctx context.Context, threadStr string) (thread core.ID
 		return "", "", fmt.Errorf("getting identity token: %v", err)
 	}
 	return thread, identity, nil
+}
+
+func rootFromString(root string) (r path.Resolved, err error) {
+	if len(root) != 0 {
+		r, err = dag.NewResolvedPath(root)
+		if err != nil {
+			return nil, fmt.Errorf("resolving root path: %v", err)
+		}
+	}
+	return r, nil
 }

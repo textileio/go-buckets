@@ -1,9 +1,6 @@
 package buckets
 
-// @todo: Validate all thread IDs
-// @todo: Validate all identities
 // @todo: Clean up error messages
-// @todo: Enforce fast-forward-only in SetPath and MovePath, PushPathAccessRoles
 
 import (
 	"context"
@@ -20,12 +17,12 @@ import (
 	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-buckets/dns"
 	"github.com/textileio/go-buckets/ipns"
-	"github.com/textileio/go-buckets/util"
 	dbc "github.com/textileio/go-threads/api/client"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 	"github.com/textileio/go-threads/db"
 	nc "github.com/textileio/go-threads/net/api/client"
+	"github.com/textileio/go-threads/net/util"
 	nutil "github.com/textileio/go-threads/net/util"
 )
 
@@ -34,6 +31,9 @@ var (
 
 	// GatewayURL is used to construct externally facing bucket links.
 	GatewayURL string
+
+	// ThreadsGatewayURL is used to construct externally facing bucket links.
+	ThreadsGatewayURL string
 
 	// WWWDomain can be set to specify the domain to use for bucket website hosting, e.g.,
 	// if this is set to mydomain.com, buckets can be rendered as a website at the following URL:
@@ -45,6 +45,18 @@ var (
 
 	movePathRegexp = regexp.MustCompile("/ipfs/([^/]+)/")
 )
+
+// IsPathNotFoundErr returns whether or not an error indicates a bucket path was not found.
+// This is needed because public and private (encrypted) buckets can return different
+// errors for the same operation.
+func IsPathNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "could not resolve path") ||
+		strings.Contains(msg, "no link named")
+}
 
 // Bucket adds thread ID to collection.Bucket.
 type Bucket struct {
@@ -72,6 +84,8 @@ type Links struct {
 	WWW string `json:"www"`
 	// IPNS is the bucket IPNS address.
 	IPNS string `json:"ipns"`
+	// BPS is the bucket pinning service URL.
+	BPS string `json:"bps"`
 }
 
 // Seed describes a bucket seed file.
@@ -99,6 +113,21 @@ type lock string
 
 func (l lock) Key() string {
 	return string(l)
+}
+
+// Txn allows for holding a bucket lock while performing multiple write operations.
+type Txn struct {
+	b        *Buckets
+	thread   core.ID
+	key      string
+	identity did.Token
+	lock     *util.Semaphore
+}
+
+// Close the Txn, releasing the bucket for additional writes.
+func (t *Txn) Close() error {
+	t.lock.Release()
+	return nil
 }
 
 // NewBuckets returns a new buckets library.
@@ -130,15 +159,42 @@ func (b *Buckets) Close() error {
 	return nil
 }
 
+// Net returns the underlying thread net client.
 func (b *Buckets) Net() *nc.Client {
 	return b.net
 }
 
+// DB returns the underlying thread db client.
 func (b *Buckets) DB() *dbc.Client {
 	return b.db
 }
 
+// Ipfs returns the underlying IPFS client.
+func (b *Buckets) Ipfs() iface.CoreAPI {
+	return b.ipfs
+}
+
+// NewTxn returns a new Txn for bucket key.
+func (b *Buckets) NewTxn(thread core.ID, key string, identity did.Token) (*Txn, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
+	lk := b.locks.Get(lock(key))
+	lk.Acquire()
+	return &Txn{
+		b:        b,
+		thread:   thread,
+		key:      key,
+		identity: identity,
+		lock:     lk,
+	}, nil
+}
+
+// Get returns a bucket by thread id and key.
 func (b *Buckets) Get(ctx context.Context, thread core.ID, key string, identity did.Token) (*Bucket, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
 		return nil, err
@@ -147,27 +203,33 @@ func (b *Buckets) Get(ctx context.Context, thread core.ID, key string, identity 
 	return instanceToBucket(thread, instance), nil
 }
 
+// GetLinks returns a Links object containing the bucket thread, IPNS, and WWW links by thread and bucket key.
 func (b *Buckets) GetLinks(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (links Links, err error) {
+	if err := thread.Validate(); err != nil {
+		return links, fmt.Errorf("invalid thread id: %v", err)
+	}
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
 		return links, err
 	}
 	log.Debugf("got %s links", key)
-	return b.GetLinksForBucket(ctx, instanceToBucket(thread, instance), pth, identity)
+	return b.GetLinksForBucket(ctx, instanceToBucket(thread, instance), identity, pth)
 }
 
+// GetLinksForBucket returns a Links object containing the bucket thread, IPNS, and WWW links.
 func (b *Buckets) GetLinksForBucket(
 	ctx context.Context,
 	bucket *Bucket,
-	pth string,
 	identity did.Token,
+	pth string,
 ) (links Links, err error) {
-	links.URL = fmt.Sprintf("%s/thread/%s/%s/%s", GatewayURL, bucket.Thread, collection.Name, bucket.Key)
+	links.URL = fmt.Sprintf("%s/thread/%s/%s/%s", ThreadsGatewayURL, bucket.Thread, collection.Name, bucket.Key)
 	if len(WWWDomain) != 0 {
 		parts := strings.Split(GatewayURL, "://")
 		if len(parts) < 2 {
@@ -188,7 +250,7 @@ func (b *Buckets) GetLinksForBucket(
 		}
 		linkKey := bucket.GetLinkEncryptionKey()
 		if _, err := dag.GetNodeAtPath(ctx, b.ipfs, npth, linkKey); err != nil {
-			return links, err
+			return links, fmt.Errorf("could not resolve path: %s", pth)
 		}
 		pth = "/" + pth
 		links.URL += pth
@@ -196,19 +258,25 @@ func (b *Buckets) GetLinksForBucket(
 			links.WWW += pth
 		}
 		links.IPNS += pth
+	} else {
+		links.BPS = fmt.Sprintf("%s/bps/%s", GatewayURL, bucket.Key)
 	}
-	if bucket.IsPrivate() {
-		query := "?token=" + string(identity)
-		links.URL += query
-		if len(links.WWW) != 0 {
-			links.WWW += query
-		}
-		links.IPNS += query
+
+	query := "?token=" + string(identity)
+	links.URL += query
+	if len(links.WWW) != 0 {
+		links.WWW += query
 	}
+	links.IPNS += query
+
 	return links, nil
 }
 
+// List returns all buckets under a thread.
 func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) ([]Bucket, error) {
+	if err := thread.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid thread id: %v", err)
+	}
 	list, err := b.c.List(ctx, thread, &db.Query{}, &collection.Bucket{}, collection.WithIdentity(identity))
 	if err != nil {
 		return nil, fmt.Errorf("listing buckets: %v", err)
@@ -224,48 +292,55 @@ func (b *Buckets) List(ctx context.Context, thread core.ID, identity did.Token) 
 	return bucks, nil
 }
 
+// Remove removes an entire bucket, unpinning all data.
 func (b *Buckets) Remove(ctx context.Context, thread core.ID, key string, identity did.Token) (int64, error) {
-	lk := b.locks.Get(lock(key))
-	lk.Acquire()
-	defer lk.Release()
-
-	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
+	txn, err := b.NewTxn(thread, key, identity)
 	if err != nil {
 		return 0, err
 	}
-	if err := b.c.Delete(ctx, thread, key, collection.WithIdentity(identity)); err != nil {
+	defer txn.Close()
+	return txn.Remove(ctx)
+}
+
+// Remove is Txn based Remove.
+func (t *Txn) Remove(ctx context.Context) (int64, error) {
+	instance, err := t.b.c.GetSafe(ctx, t.thread, t.key, collection.WithIdentity(t.identity))
+	if err != nil {
+		return 0, err
+	}
+	if err := t.b.c.Delete(ctx, t.thread, t.key, collection.WithIdentity(t.identity)); err != nil {
 		return 0, fmt.Errorf("deleting bucket: %v", err)
 	}
 
-	buckPath, err := util.NewResolvedPath(instance.Path)
+	buckPath, err := dag.NewResolvedPath(instance.Path)
 	if err != nil {
 		return 0, fmt.Errorf("resolving path: %v", err)
 	}
 	linkKey := instance.GetLinkEncryptionKey()
 	if linkKey != nil {
-		ctx, err = dag.UnpinNodeAndBranch(ctx, b.ipfs, buckPath, linkKey)
+		ctx, err = dag.UnpinNodeAndBranch(ctx, t.b.ipfs, buckPath, linkKey)
 		if err != nil {
 			return 0, err
 		}
 	} else {
-		ctx, err = dag.UnpinPath(ctx, b.ipfs, buckPath)
+		ctx, err = dag.UnpinPath(ctx, t.b.ipfs, buckPath)
 		if err != nil {
 			return 0, err
 		}
 	}
-	if err := b.ipns.RemoveKey(ctx, key); err != nil {
+	if err := t.b.ipns.RemoveKey(ctx, t.key); err != nil {
 		return 0, err
 	}
 
-	log.Debugf("removed %s", key)
+	log.Debugf("removed %s", t.key)
 	return dag.GetPinnedBytes(ctx), nil
 }
 
 func (b *Buckets) saveAndPublish(
 	ctx context.Context,
 	thread core.ID,
-	instance *collection.Bucket,
 	identity did.Token,
+	instance *collection.Bucket,
 ) error {
 	if err := b.c.Save(ctx, thread, instance, collection.WithIdentity(identity)); err != nil {
 		return fmt.Errorf("saving bucket: %v", err)

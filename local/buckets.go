@@ -16,7 +16,7 @@ import (
 	"github.com/textileio/go-buckets/api/client"
 	"github.com/textileio/go-buckets/cmd"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/thread"
 )
 
@@ -56,7 +56,7 @@ func NewBuckets(c *client.Client, config cmd.ConfConfig) *Buckets {
 	return &Buckets{c: c, config: config}
 }
 
-// Clients returns the underlying client object.
+// Client returns the underlying client object.
 func (b *Buckets) Client() *client.Client {
 	return b.c
 }
@@ -154,7 +154,7 @@ func (b *Buckets) NewBucket(ctx context.Context, conf Config, opts ...NewOption)
 		pushBlock: make(chan struct{}, 1),
 	}
 
-	ctx, err = authCtx(ctx, b.c, conf.Identity)
+	ctx, err = authCtx(ctx, b.c, conf.Identity, time.Hour)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (b *Buckets) NewBucket(ctx context.Context, conf Config, opts ...NewOption)
 		if err = buck.repo.SetRemotePath(collection.SeedName, sc); err != nil {
 			return nil, err
 		}
-		rp, err := util.NewResolvedPath(rep.Bucket.Path)
+		rp, err := dag.NewResolvedPath(rep.Bucket.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -325,7 +325,7 @@ func (b *Buckets) RemoteBuckets(
 	id thread.ID,
 	identity thread.Identity,
 ) (list []buckets.Bucket, err error) {
-	ctx, err = authCtx(ctx, b.c, identity)
+	ctx, err = authCtx(ctx, b.c, identity, time.Hour)
 	if err != nil {
 		return nil, err
 	}
@@ -344,6 +344,11 @@ func (b *Buckets) RemoteBuckets(
 }
 
 // authCtx returns an identity token context for authentication and authorization.
-func authCtx(ctx context.Context, c *client.Client, identity thread.Identity) (context.Context, error) {
-	return c.NewTokenContext(ctx, identity, time.Second)
+func authCtx(
+	ctx context.Context,
+	c *client.Client,
+	identity thread.Identity,
+	dur time.Duration,
+) (context.Context, error) {
+	return c.NewTokenContext(ctx, identity, dur)
 }

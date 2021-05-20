@@ -18,6 +18,7 @@ import (
 	core "github.com/textileio/go-threads/core/thread"
 )
 
+// parsePath validates and cleans a bucket path.
 func parsePath(pth string) (fpth string, err error) {
 	if strings.Contains(pth, collection.SeedName) {
 		err = fmt.Errorf("paths containing %s are not allowed", collection.SeedName)
@@ -164,8 +165,9 @@ func (b *Buckets) removePath(
 func (b *Buckets) getBucketAndPath(
 	ctx context.Context,
 	thread core.ID,
-	key, pth string,
+	key string,
 	identity did.Token,
+	pth string,
 ) (*collection.Bucket, path.Path, error) {
 	instance, err := b.c.GetSafe(ctx, thread, key, collection.WithIdentity(identity))
 	if err != nil {
@@ -175,6 +177,7 @@ func (b *Buckets) getBucketAndPath(
 	return instance, bpth, err
 }
 
+// getBucketPath concatenates the bucket root path with path.
 func getBucketPath(bucket *collection.Bucket, pth string) (path.Path, error) {
 	bpth := path.New(gopath.Join(bucket.Path, pth))
 	if err := bpth.IsValid(); err != nil {

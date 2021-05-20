@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/textileio/go-buckets/collection/mergemap"
+
 	"github.com/alecthomas/jsonschema"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/textileio/dcrypto"
@@ -101,9 +103,10 @@ func (r Role) String() string {
 
 // Metadata contains metadata about a bucket item (a file or folder).
 type Metadata struct {
-	Key       string           `json:"key,omitempty"`
-	Roles     map[did.DID]Role `json:"roles"`
-	UpdatedAt int64            `json:"updated_at"`
+	Key       string                 `json:"key,omitempty"`
+	Roles     map[did.DID]Role       `json:"roles"`
+	Info      map[string]interface{} `json:"info,omitempty"`
+	UpdatedAt int64                  `json:"updated_at"`
 }
 
 // NewDefaultMetadata returns the default metadata for a path.
@@ -254,11 +257,19 @@ func (b *Bucket) SetMetadataAtPath(pth string, md Metadata) {
 		if md.Roles != nil {
 			x.Roles = md.Roles
 		}
+		if x.Info == nil {
+			x.Info = md.Info
+		} else if md.Info != nil {
+			mergemap.Merge(x.Info, md.Info)
+		}
 		x.UpdatedAt = md.UpdatedAt
 		b.Metadata[pth] = x
 	} else {
 		if md.Roles == nil {
 			md.Roles = make(map[did.DID]Role)
+		}
+		if md.Info == nil {
+			md.Info = make(map[string]interface{})
 		}
 		b.Metadata[pth] = md
 	}
@@ -277,11 +288,38 @@ func (b *Bucket) UnsetMetadataWithPrefix(pre string) {
 	}
 }
 
-// ensureNoNulls inflates any values that are nil due to schema updates.
-func (b *Bucket) ensureNoNulls() {
-	if b.Metadata == nil {
-		b.Metadata = make(map[string]Metadata)
+// IsReadablePath returns whether or not a bucket path is readable by a did.DID.
+func (b *Bucket) IsReadablePath(pth string, id did.DID) bool {
+	md, _, ok := b.GetMetadataForPath(pth, false)
+	if !ok {
+		return false
 	}
+	role, ok := md.Roles["*"]
+	if ok && role > NoneRole {
+		return true
+	}
+	role, ok = md.Roles[id]
+	if ok && role > NoneRole {
+		return true
+	}
+	return false
+}
+
+// IsWritablePath returns whether or not a bucket path is writable by a did.DID.
+func (b *Bucket) IsWritablePath(pth string, id did.DID) bool {
+	md, _, ok := b.GetMetadataForPath(pth, false)
+	if !ok {
+		return false
+	}
+	role, ok := md.Roles["*"]
+	if ok && role > ReaderRole {
+		return true
+	}
+	role, ok = md.Roles[id]
+	if ok && role > ReaderRole {
+		return true
+	}
+	return false
 }
 
 // Copy returns a copy of the bucket.
@@ -300,6 +338,13 @@ func (b *Bucket) Copy() *Bucket {
 		Metadata:  md,
 		CreatedAt: b.CreatedAt,
 		UpdatedAt: b.UpdatedAt,
+	}
+}
+
+// ensureNoNulls inflates any values that are nil due to schema updates.
+func (b *Bucket) ensureNoNulls() {
+	if b.Metadata == nil {
+		b.Metadata = make(map[string]Metadata)
 	}
 }
 
@@ -484,7 +529,7 @@ func NewBuckets(c *dbc.Client) (*Buckets, error) {
 	}, nil
 }
 
-// Create a bucket instance.
+// New creates a bucket instance.
 // Owner must be the identity token's subject.
 func (b *Buckets) New(
 	ctx context.Context,

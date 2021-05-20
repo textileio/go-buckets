@@ -18,7 +18,7 @@ import (
 	"github.com/textileio/go-buckets/api/cast"
 	pb "github.com/textileio/go-buckets/api/pb/buckets"
 	"github.com/textileio/go-buckets/collection"
-	"github.com/textileio/go-buckets/util"
+	"github.com/textileio/go-buckets/dag"
 	"github.com/textileio/go-threads/core/did"
 	core "github.com/textileio/go-threads/core/thread"
 	"google.golang.org/grpc"
@@ -41,25 +41,6 @@ type Client struct {
 	target did.DID
 }
 
-// /ip4/<host_ip>/tcp/<host_port>/p2p/<peer_id>
-// /dnsaddr/<host_name>/p2p/<peer_id>
-//func getGRPCTarget(addr maddr.Multiaddr) (string, error) {
-//	p2p, err := addr.ValueForProtocol(maddr.P_P2P)
-//	if err != nil {
-//		return "", fmt.Errorf("p2p address component is missing from %s", addr)
-//	}
-//	ip, err := addr.ValueForProtocol(maddr.P_IP4)
-//	if err == nil {
-//		ip, err := addr.ValueForProtocol(maddr.P_IP4)
-//		return "", fmt.Errorf("p2p address component is missing from %s", addr)
-//	} else {
-//		dnsaddr, err := addr.ValueForProtocol(maddr.P_DNS)
-//		if err != nil {
-//
-//		}
-//	}
-//}
-
 // NewClient starts the client.
 func NewClient(addr string, opts ...grpc.DialOption) (*Client, error) {
 	conn, err := grpc.Dial(addr, opts...)
@@ -69,7 +50,7 @@ func NewClient(addr string, opts ...grpc.DialOption) (*Client, error) {
 	return &Client{
 		c:      pb.NewAPIServiceClient(conn),
 		conn:   conn,
-		target: "did:key:foo", // @todo: Fix me
+		target: "did:key:foo", // @todo: Get target from thread services
 	}, nil
 }
 
@@ -93,10 +74,7 @@ func (c *Client) NewTokenContext(
 
 // Create initializes a new bucket.
 // The bucket name is only meant to help identify a bucket in a UI and is not unique.
-func (c *Client) Create(
-	ctx context.Context,
-	opts ...buckets.CreateOption,
-) (*pb.CreateResponse, error) {
+func (c *Client) Create(ctx context.Context, opts ...buckets.CreateOption) (*pb.CreateResponse, error) {
 	args := &buckets.CreateOptions{}
 	for _, opt := range opts {
 		opt(args)
@@ -438,7 +416,7 @@ func (c *Client) PushPaths(
 				q.outCh <- PushPathsResult{err: err}
 				return
 			}
-			root, err := util.NewResolvedPath(rep.Bucket.Path)
+			root, err := dag.NewResolvedPath(rep.Bucket.Path)
 			if err != nil {
 				q.outCh <- PushPathsResult{err: err}
 				return
@@ -455,10 +433,11 @@ func (c *Client) PushPaths(
 
 	sendChunk := func(c *pb.PushPathsRequest_Chunk) bool {
 		q.lk.Lock()
-		defer q.lk.Unlock()
 		if q.closed {
+			q.lk.Unlock()
 			return false
 		}
+		q.lk.Unlock()
 
 		if err := stream.Send(&pb.PushPathsRequest{
 			Payload: &pb.PushPathsRequest_Chunk_{
@@ -471,9 +450,12 @@ func (c *Client) PushPaths(
 			return false
 		}
 		atomic.AddInt64(&q.complete, int64(len(c.Data)))
-		if args.Progress != nil {
-			args.Progress <- q.complete
+
+		q.lk.Lock()
+		if !q.closed && args.Progress != nil {
+			args.Progress <- atomic.LoadInt64(&q.complete)
 		}
+		q.lk.Unlock()
 		return true
 	}
 
@@ -592,20 +574,46 @@ func (c *Client) SetPath(
 	thread core.ID,
 	key, pth string,
 	remoteCid cid.Cid,
+	opts ...buckets.Option,
 ) (*pb.SetPathResponse, error) {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
 	return c.c.SetPath(ctx, &pb.SetPathRequest{
 		Thread: thread.String(),
 		Key:    key,
+		Root:   xr,
 		Path:   filepath.ToSlash(pth),
 		Cid:    remoteCid.String(),
 	})
 }
 
 // MovePath moves a particular path to another path in the existing IPFS UnixFS DAG.
-func (c *Client) MovePath(ctx context.Context, thread core.ID, key, pth string, dest string) error {
+func (c *Client) MovePath(
+	ctx context.Context,
+	thread core.ID,
+	key, pth string, dest string,
+	opts ...buckets.Option,
+) error {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
 	_, err := c.c.MovePath(ctx, &pb.MovePathRequest{
 		Thread:   thread.String(),
 		Key:      key,
+		Root:     xr,
 		FromPath: filepath.ToSlash(pth),
 		ToPath:   filepath.ToSlash(dest),
 	})
@@ -624,6 +632,7 @@ func (c *Client) RemovePath(
 	for _, opt := range opts {
 		opt(args)
 	}
+
 	var xr string
 	if args.Root != nil {
 		xr = args.Root.String()
@@ -631,13 +640,13 @@ func (c *Client) RemovePath(
 	res, err := c.c.RemovePath(ctx, &pb.RemovePathRequest{
 		Thread: thread.String(),
 		Key:    key,
-		Path:   filepath.ToSlash(pth),
 		Root:   xr,
+		Path:   filepath.ToSlash(pth),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return util.NewResolvedPath(res.Bucket.Path)
+	return dag.NewResolvedPath(res.Bucket.Path)
 }
 
 // PushPathAccessRoles updates path access roles by merging the pushed roles with existing roles.
@@ -649,10 +658,21 @@ func (c *Client) PushPathAccessRoles(
 	thread core.ID,
 	key, pth string,
 	roles map[did.DID]collection.Role,
+	opts ...buckets.Option,
 ) error {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
 	_, err := c.c.PushPathAccessRoles(ctx, &pb.PushPathAccessRolesRequest{
 		Thread: thread.String(),
 		Key:    key,
+		Root:   xr,
 		Path:   filepath.ToSlash(pth),
 		Roles:  cast.RolesToPb(roles),
 	})
@@ -674,4 +694,53 @@ func (c *Client) PullPathAccessRoles(
 		return nil, err
 	}
 	return cast.RolesFromPb(res.Roles), nil
+}
+
+// PushPathInfo updates path info by merging the pushed info with existing info.
+func (c *Client) PushPathInfo(
+	ctx context.Context,
+	thread core.ID,
+	key, pth string,
+	info map[string]interface{},
+	opts ...buckets.Option,
+) error {
+	args := &buckets.Options{}
+	for _, opt := range opts {
+		opt(args)
+	}
+
+	var xr string
+	if args.Root != nil {
+		xr = args.Root.String()
+	}
+
+	data, err := cast.InfoToPb(info)
+	if err != nil {
+		return err
+	}
+	_, err = c.c.PushPathInfo(ctx, &pb.PushPathInfoRequest{
+		Thread: thread.String(),
+		Key:    key,
+		Root:   xr,
+		Path:   filepath.ToSlash(pth),
+		Info:   data,
+	})
+	return err
+}
+
+// PullPathInfo returns info for a path.
+func (c *Client) PullPathInfo(
+	ctx context.Context,
+	thread core.ID,
+	key, pth string,
+) (map[string]interface{}, error) {
+	res, err := c.c.PullPathInfo(ctx, &pb.PullPathInfoRequest{
+		Thread: thread.String(),
+		Key:    key,
+		Path:   filepath.ToSlash(pth),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cast.InfoFromPb(res.Info)
 }
