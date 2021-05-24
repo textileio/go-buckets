@@ -5,7 +5,7 @@ services:
       context: ../../
       dockerfile: ./cmd/buckd/Dockerfile.dev
     volumes:
-      - "${REPO_PATH}/buckets:/data/buckets"
+      - buckets_data:/data/buckets
     platform: linux/amd64
     environment:
       - BUCK_LOG_DEBUG=true
@@ -39,7 +39,7 @@ services:
   threads:
     image: textile/threads:sha-43a1673
     volumes:
-      - "${REPO_PATH}/threads:/data/threads"
+      - threads_data:/data/threads
     platform: linux/amd64
     environment:
       - THREADS_DEBUG=true
@@ -55,7 +55,7 @@ services:
   ipfs:
     image: textile/go-ipfs:sha-ce693d7
     volumes:
-      - "${REPO_PATH}/ipfs:/data/ipfs"
+      - ipfs_data:/data/ipfs
     platform: linux/amd64
     environment:
       - IPFS_PROFILE=test
@@ -64,3 +64,7 @@ services:
       - "4011:4001/udp"
       - "127.0.0.1:8081:8080"
     restart: unless-stopped
+volumes:
+  buckets_data:
+  threads_data:
+  ipfs_data:
